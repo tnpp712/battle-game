@@ -4,6 +4,7 @@ import sys
 import pygame
 
 import config as C
+import audio
 from game import Game
 
 
@@ -54,6 +55,8 @@ def main():
     screen = pygame.display.set_mode((C.SCREEN_W, C.SCREEN_H))
     clock = pygame.time.Clock()
     fonts, wfonts = load_fonts()
+    audio.init()                # 程序化音效/音乐（无音频设备时自动降级静音）
+    audio.start_music()
     game = Game(fonts, wfonts)
 
     running = True

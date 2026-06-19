@@ -10,6 +10,7 @@ from ui import HUD, draw_hp_bar
 from pathfield import FlowField, find_path
 import sprites
 import render
+import audio
 from particles import Particles
 from sprites import lighten
 
@@ -137,6 +138,7 @@ class Game:
         self.spawn_queue = queue
         self.spawn_timer = 0.5
         self.state = "WAVE"
+        audio.play("wave")
         self.paused = False
 
     def _spawn_one(self):
@@ -159,8 +161,10 @@ class Game:
         self.wave_index += 1
         if self.wave_index >= len(C.WAVES):
             self.state = "WON"
+            audio.play("win")
         else:
             self.state = "BUILD"
+            audio.play("build")
         # 复活阵亡机兵（保留游戏推进感），回满血
         for m in self.mechs:
             if not m.alive:
@@ -228,6 +232,8 @@ class Game:
             self._try_global("overclock")
         elif key == pygame.K_c:
             self._try_global("timewarp")
+        elif key == pygame.K_m:
+            self._flash("已静音" if audio.toggle_mute() else "已取消静音")
         elif key == pygame.K_TAB:
             if self.build_selection == "wall":
                 self.wall_vertical = not self.wall_vertical
@@ -263,14 +269,17 @@ class Game:
                 self._flash(reason)
             return
         if spec["target"] == "self":
-            m.use_ability(self, slot)
+            if m.use_ability(self, slot):
+                audio.play("cast")
         else:
             def cast(pos, m=m, slot=slot, spec=spec):
                 tgt = pos
                 if spec["target"] == "enemy":
                     e = self._enemy_at(pos)
                     tgt = e.pos if e is not None else pos
-                if not m.use_ability(self, slot, tgt):
+                if m.use_ability(self, slot, tgt):
+                    audio.play("cast")
+                else:
                     _, why = m.can_use(slot)
                     if why:
                         self._flash(why)
@@ -309,9 +318,11 @@ class Game:
         self.resources -= spec["cost"]
         self.global_cd[name] = spec["cd"]
         eff = spec["effect"]
+        audio.play("cast")
         if eff == "orbital" and target is not None:
             c = Vector2(target)
             self.particles.explosion(c, (255, 200, 120), n=30)
+            audio.play("explosion", throttle=0.05)
             self.particles.rings.append(dict(pos=Vector2(c), r=14, max_r=spec["radius"],
                                              life=0.6, max=0.6, color=(255, 180, 110)))
             for e in list(self.enemies):
@@ -479,6 +490,7 @@ class Game:
                 return
             self.towers.append(Tower(pos, data))
         self.resources -= cost
+        audio.play("build")
 
     def _buy_upgrade(self, name):
         lv = getattr(self.terminal, name + "_lv")
@@ -487,6 +499,7 @@ class Game:
             self._flash("资源不足")
             return
         self.resources -= cost
+        audio.play("build")
         setattr(self.terminal, name + "_lv", lv + 1)
         if name == "shield":
             self.terminal.max_hp += 250
@@ -496,6 +509,7 @@ class Game:
     # ---------------- 更新 ----------------
     def update(self, dt):
         self.anim_time += dt
+        audio.tick(dt)
         if self.message_timer > 0:
             self.message_timer -= dt
         # 打击感计时衰减（始终推进）
@@ -556,6 +570,7 @@ class Game:
                                     life=0.3, max=0.3, color=(255, 255, 255)))
                 self.add_shake(10)
                 self.hitstop = max(self.hitstop, 0.05)   # 顿帧
+                audio.play("explosion", throttle=0.05)
                 m._death_done = True
         for w in self.walls:
             w.hit_flash = max(0.0, w.hit_flash - dt)
@@ -569,9 +584,11 @@ class Game:
             p.spark(t.pos, (255, 120, 120), n=4)
             self.term_flash = min(1.0, self.term_flash + t._dmg_taken / 90.0)
             self.add_shake(min(13.0, t._dmg_taken * 0.5))
+            audio.play("alarm", throttle=0.4)
             t._dmg_taken = 0.0
 
     def _update_wave(self, dt):
+        beams0 = len(self.beams)
         # 出怪
         if self.spawn_queue:
             self.spawn_timer -= dt
@@ -586,6 +603,9 @@ class Game:
         for m in self.mechs:
             if m.alive:
                 m.update_combat(dt, self)
+        # 有新光束（开火）→ 节流播放激光音
+        if len(self.beams) > beams0:
+            audio.play("laser", vol=0.4, throttle=0.07)
         # 炮塔
         rb = self.terminal.tower_range_bonus
         for tw in self.towers:
@@ -612,6 +632,7 @@ class Game:
             else:
                 self.resources += e.reward
                 self.particles.explosion(e.pos, e.color, n=20)
+                audio.play("explosion", vol=0.7, throttle=0.05)
                 # 大型单位死亡给点震屏
                 if e.radius >= 18 or e.bomber:
                     self.add_shake(6)
@@ -631,6 +652,7 @@ class Game:
         # 判负
         if not self.terminal.alive:
             self.state = "LOST"
+            audio.play("lose")
             return
         # 判定波次结束
         if not self.spawn_queue and not self.enemies:
