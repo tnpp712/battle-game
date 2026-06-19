@@ -1,7 +1,14 @@
 # 机兵防卫圈 — 崩坏战
 
+[![CI](https://github.com/tnpp712/battle-game/actions/workflows/ci.yml/badge.svg)](https://github.com/tnpp712/battle-game/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
+![Pygame](https://img.shields.io/badge/Pygame-2.5%2B-2ea44f)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-555)
+
 模仿《十三机兵防卫圈》战斗（崩坏战）模式的塔防 / 即时策略小游戏，去掉剧情。
 你指挥一支机兵小队守护中央**终端**，抵御一波波从四面来袭的机械兽，并可在战场布防、升级基地。
+
+> 纯 Python + Pygame，**无任何外部素材**——所有单位与特效均为矢量绘制（抗锯齿 + 辉光 + 2× 超采样）。
 
 ## 运行
 
@@ -10,7 +17,13 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
-需要 Python 3.8+ 与 Pygame。
+需要 Python 3.9+ 与 Pygame。
+
+无窗口冒烟测试（CI 亦运行此脚本）：
+
+```bash
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy python3 smoke_test.py
+```
 
 ## 玩法
 
