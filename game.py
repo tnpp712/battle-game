@@ -24,7 +24,21 @@ class Game:
         # 战场超采样画布（2×）与降采样缓冲
         self.scene = pygame.Surface((C.SCREEN_W * self.rs, self.field.bottom * self.rs))
         self._down = pygame.Surface((C.SCREEN_W, self.field.bottom))
+        self._red_vig = self._build_red_vignette()    # 终端受击红闪叠层
         self.reset()
+
+    def _build_red_vignette(self):
+        """边缘渐强的红色暗角，叠加在窗口战场区，强度按 term_flash 调制。"""
+        surf = pygame.Surface((C.SCREEN_W, self.field.bottom), pygame.SRCALPHA)
+        depth = 130
+        for i in range(depth):
+            a = int(170 * (1 - i / depth) ** 2)
+            pygame.draw.rect(surf, (255, 45, 45, a),
+                             (i, i, C.SCREEN_W - 2 * i, self.field.bottom - 2 * i), 1)
+        return surf
+
+    def add_shake(self, mag):
+        self.shake = min(18.0, self.shake + mag)
 
     # ---------------- 初始化 ----------------
     def reset(self):
@@ -55,6 +69,10 @@ class Game:
         self.message = ""
         self.message_timer = 0.0
         self.anim_time = 0.0
+        # 打击感
+        self.shake = 0.0            # 当前震屏幅度（像素）
+        self.hitstop = 0.0          # >0 时战斗短暂冻结（命中顿帧）
+        self.term_flash = 0.0       # 终端受击红闪强度 0..1
 
         self.flow = FlowField(self.field)
         self._flow_dirty = False
@@ -480,6 +498,9 @@ class Game:
         self.anim_time += dt
         if self.message_timer > 0:
             self.message_timer -= dt
+        # 打击感计时衰减（始终推进）
+        self.shake = max(0.0, self.shake - 75 * dt)
+        self.term_flash = max(0.0, self.term_flash - 2.6 * dt)
         # 光束 / 粒子始终更新
         self.beams = [b for b in self.beams if b.update(dt)]
         self.particles.update(dt)
@@ -488,6 +509,12 @@ class Game:
             self._rebuild_flow()
 
         if self.state in ("WON", "LOST"):
+            return
+
+        # 命中顿帧：短暂冻结战斗与移动，但特效继续播
+        if self.hitstop > 0:
+            self.hitstop -= dt
+            self._combat_fx(dt)
             return
 
         obstacles = self.obstacle_rects()
@@ -524,7 +551,11 @@ class Game:
                 p.spark(m.pos, (255, 160, 90), n=5)
                 m._dmg_taken = 0.0
             if not m.alive and not m._death_done:
-                p.explosion(m.pos, m.color, n=26)
+                p.explosion(m.pos, m.color, n=30)
+                p.rings.append(dict(pos=Vector2(m.pos), r=8, max_r=52,
+                                    life=0.3, max=0.3, color=(255, 255, 255)))
+                self.add_shake(10)
+                self.hitstop = max(self.hitstop, 0.05)   # 顿帧
                 m._death_done = True
         for w in self.walls:
             w.hit_flash = max(0.0, w.hit_flash - dt)
@@ -536,6 +567,8 @@ class Game:
         if t._dmg_taken > 0:
             p.number(t.pos, t._dmg_taken, (255, 120, 120))
             p.spark(t.pos, (255, 120, 120), n=4)
+            self.term_flash = min(1.0, self.term_flash + t._dmg_taken / 90.0)
+            self.add_shake(min(13.0, t._dmg_taken * 0.5))
             t._dmg_taken = 0.0
 
     def _update_wave(self, dt):
@@ -579,6 +612,9 @@ class Game:
             else:
                 self.resources += e.reward
                 self.particles.explosion(e.pos, e.color, n=20)
+                # 大型单位死亡给点震屏
+                if e.radius >= 18 or e.bomber:
+                    self.add_shake(6)
         self.enemies = survivors
         before = len(self.walls)
         for w in self.walls:
@@ -651,9 +687,20 @@ class Game:
             img = self.wfonts["mid"].render(self.message, True, C.C_TEXT_WARN)
             r = img.get_rect(center=(C.SCREEN_W // 2 * s, (C.SCREEN_H - C.HUD_H - 24) * s))
             scene.blit(img, r)
-        # 超采样画布 → 降采样到窗口战场区
+        # 超采样画布 → 降采样到窗口战场区（带震屏偏移）
         pygame.transform.smoothscale(scene, (C.SCREEN_W, self.field.bottom), self._down)
-        surf.blit(self._down, (0, 0))
+        ox = oy = 0
+        if self.shake > 0.5:
+            ox = int(random.uniform(-self.shake, self.shake))
+            oy = int(random.uniform(-self.shake, self.shake))
+            surf.fill(C.C_BG, (0, 0, C.SCREEN_W, self.field.bottom))   # 盖住偏移留下的缝
+        surf.blit(self._down, (ox, oy))
+        # 终端受击红闪
+        if self.term_flash > 0.01:
+            ov = self._red_vig.copy()
+            ov.fill((255, 255, 255, int(200 * min(1.0, self.term_flash))),
+                    special_flags=pygame.BLEND_RGBA_MULT)
+            surf.blit(ov, (0, 0))
         # HUD（窗口原生 1× 绘制）
         self.hud.draw(surf, self)
 
