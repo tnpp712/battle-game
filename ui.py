@@ -4,6 +4,32 @@ import pygame
 import config as C
 import render
 
+# 悬停提示文案（按技能/全局/建造的 effect 或 id）
+_EFFECT_DESC = {
+    "shock": "周围范围伤害 + 眩晕 + 击退",
+    "dash": "突进到点位，落点范围伤害",
+    "barrage": "指定点位大范围轰炸",
+    "calibrate": "限时增伤+增程，但生根不可动",
+    "strafe": "射程内全体多段扫射",
+    "overdrive": "限时攻速+移速大增",
+    "heal_all": "全体友军回血",
+    "barrier": "点位范围内友军获护盾",
+    "emp_pulse": "范围眩晕 + 小伤害",
+    "slow_field": "点位部署减速灼烧力场",
+    "deploy_turret": "点位召唤限时自动炮台",
+    "heal_drone": "点位召唤限时治疗无人机",
+    "orbital": "点位巨额范围伤害",
+    "overclock": "全体机兵限时增伤+攻速+移速",
+    "timewarp": "全场敌人限时减速",
+}
+_BUILD_DESC = {
+    "wall": "阻挡地面敌人去路（可被攻击）",
+    "tower": "射程内自动开火",
+    "repair": "治疗终端附近的机兵",
+    "shield": "提升终端血量上限并持续回复",
+    "radar": "提升所有炮塔射程",
+}
+
 
 def draw_hp_bar(surf, x, y, w, h, frac):
     frac = max(0.0, min(1.0, frac))
@@ -67,6 +93,9 @@ class HUD:
         self.f_big = fonts["big"]
         self.f_tiny = fonts["tiny"]
         self.buttons = {}
+        self.ability_buttons = {}   # slot -> Rect（所选机兵的技能槽）
+        self.global_buttons = {}    # name -> Rect（终端全局技能）
+        self.tooltip = None         # 悬停提示：(标题, [行...], 锚点rect)
 
     def _text(self, surf, txt, x, y, font, color=C.C_TEXT, center=False):
         img = font.render(txt, True, color)
@@ -94,7 +123,13 @@ class HUD:
         aiming = (game.aiming is not None and game.aiming.get("mech") is m
                   and game.aiming.get("slot") == slot)
         rect = pygame.Rect(x, y, w, h)
-        fill = (40, 54, 40) if aiming else (28, 34, 48) if ready else (22, 24, 34)
+        self.ability_buttons[slot] = rect
+        hover = rect.collidepoint(pygame.mouse.get_pos())
+        if hover:
+            self.tooltip = (f"{spec['key']} · {spec['name']}",
+                            [f"耗能 {spec['cost']}   冷却 {spec['cd']:.0f}s",
+                             _EFFECT_DESC.get(spec["effect"], "")], rect)
+        fill = (40, 54, 40) if aiming else (34, 44, 62) if hover else (28, 34, 48) if ready else (22, 24, 34)
         border = C.C_SELECT if aiming else (70, 140, 110) if ready else C.C_HUD_LINE
         pygame.draw.rect(surf, fill, rect, border_radius=6)
         pygame.draw.rect(surf, border, rect, 2, border_radius=6)
@@ -126,6 +161,9 @@ class HUD:
         render.glow(surf, (C.SCREEN_W // 2, hud_y), 200, (10, 24, 40))
 
         mouse = pygame.mouse.get_pos()
+        self.ability_buttons.clear()
+        self.global_buttons.clear()
+        self.tooltip = None
 
         # --- 左：状态 ---
         _res_icon(surf, 30, hud_y + 26)
@@ -163,6 +201,9 @@ class HUD:
             selected = (game.build_selection == name)
             hover = rect.collidepoint(mouse)
             afford = game.resources >= cost
+            if hover:
+                self.tooltip = (label.split(" [")[0],
+                                [f"花费 {cost}", _BUILD_DESC.get(name, "")], rect)
             fill = (44, 56, 40) if selected else (34, 42, 58) if hover else (22, 26, 38)
             border = C.C_SELECT if selected else (70, 110, 160) if hover else C.C_HUD_LINE
             _panel(surf, rect, fill, border, sel=selected)
@@ -196,6 +237,53 @@ class HUD:
 
         self._draw_globals(surf, game)
         self._draw_banner(surf, game)
+        if game.state == "BUILD":
+            self._draw_wave_preview(surf, game)
+        self._draw_tooltip(surf)
+
+    def _draw_wave_preview(self, surf, game):
+        """建造期顶部预览下一波敌人构成。"""
+        if game.wave_index >= len(C.WAVES):
+            return
+        comp = C.WAVES[game.wave_index]["enemies"]
+        chips = []
+        for tname, count in comp:
+            col = C.ENEMY_TYPES[tname]["color"]
+            chips.append((tname[0], count, col))
+        # 估算总宽并居中
+        cw = 64
+        total = 60 + len(chips) * cw
+        x = C.SCREEN_W // 2 - total // 2
+        y = 52
+        self._text(surf, "下一波", x, y + 2, self.f_tiny, C.C_TEXT_DIM)
+        x += 56
+        for ch, count, col in chips:
+            render.aacircle(surf, col, (x + 8, y + 10), 8)
+            render.aaring(surf, tuple(min(255, c + 60) for c in col), (x + 8, y + 10), 8, 1)
+            self._text(surf, ch, x + 4, y + 2, self.f_tiny, (12, 14, 20))
+            self._text(surf, f"×{count}", x + 20, y + 2, self.f_tiny, C.C_TEXT)
+            x += cw
+
+    def _draw_tooltip(self, surf):
+        if not self.tooltip:
+            return
+        title, lines, anchor = self.tooltip
+        imgs = [self.f_tiny.render(title, True, C.C_TEXT)]
+        imgs += [self.f_tiny.render(s, True, C.C_TEXT_DIM) for s in lines if s]
+        w = max(i.get_width() for i in imgs) + 16
+        h = sum(i.get_height() for i in imgs) + 12
+        bx = min(max(4, anchor.centerx - w // 2), C.SCREEN_W - w - 4)
+        by = anchor.top - h - 6
+        if by < 4:
+            by = anchor.bottom + 6
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((16, 20, 30, 240))
+        pygame.draw.rect(panel, (70, 120, 170), (0, 0, w, h), 2, border_radius=6)
+        surf.blit(panel, (bx, by))
+        yy = by + 6
+        for i in imgs:
+            surf.blit(i, (bx + 8, yy))
+            yy += i.get_height()
 
     def _draw_globals(self, surf, game):
         """左上角：终端全局技能（Z/X/C），消耗资源。"""
@@ -206,6 +294,11 @@ class HUD:
             afford = game.resources >= spec["cost"]
             ready = active and cd <= 0 and afford
             rect = pygame.Rect(x, y, w, h)
+            self.global_buttons[name] = rect
+            if rect.collidepoint(pygame.mouse.get_pos()):
+                self.tooltip = (f"{spec['key']} · {spec['name']}",
+                                [f"资源 {spec['cost']}   冷却 {spec['cd']:.0f}s",
+                                 _EFFECT_DESC.get(spec["effect"], "")], rect)
             fill = (28, 36, 50) if ready else (20, 24, 34)
             border = (90, 160, 210) if ready else C.C_HUD_LINE
             pygame.draw.rect(surf, fill, rect, border_radius=6)

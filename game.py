@@ -1,4 +1,5 @@
 """核心游戏逻辑：状态机、地图、事件处理、更新与绘制。"""
+import math
 import random
 import pygame
 from pygame.math import Vector2
@@ -74,6 +75,8 @@ class Game:
         self.shake = 0.0            # 当前震屏幅度（像素）
         self.hitstop = 0.0          # >0 时战斗短暂冻结（命中顿帧）
         self.term_flash = 0.0       # 终端受击红闪强度 0..1
+        self.threat_dirs = {"top": 0, "bottom": 0, "left": 0, "right": 0}
+        self._prepare_wave()        # 预排第一波（出怪边 + 方向预警）
 
         self.flow = FlowField(self.field)
         self._flow_dirty = False
@@ -127,23 +130,34 @@ class Game:
     def enemies_remaining(self):
         return len(self.enemies) + len(self.spawn_queue)
 
+    def _prepare_wave(self):
+        """进入 BUILD 时预排下一波：给每个敌人预定出怪边，供方向预警与出怪共用。"""
+        self.threat_dirs = {"top": 0, "bottom": 0, "left": 0, "right": 0}
+        self.spawn_queue = []
+        if self.wave_index >= len(C.WAVES):
+            return
+        sides = ("top", "bottom", "left", "right")
+        plan = []
+        for tname, count in C.WAVES[self.wave_index]["enemies"]:
+            for _ in range(count):
+                side = random.choice(sides)
+                plan.append((tname, side))
+                self.threat_dirs[side] += 1
+        random.shuffle(plan)
+        self.spawn_queue = plan
+
     def start_wave(self):
         if self.state != "BUILD":
             return
-        wave = C.WAVES[self.wave_index]
-        queue = []
-        for tname, count in wave["enemies"]:
-            queue.extend([tname] * count)
-        random.shuffle(queue)
-        self.spawn_queue = queue
+        if not self.spawn_queue:
+            self._prepare_wave()
         self.spawn_timer = 0.5
         self.state = "WAVE"
         audio.play("wave")
         self.paused = False
 
     def _spawn_one(self):
-        tname = self.spawn_queue.pop(0)
-        side = random.choice(("top", "bottom", "left", "right"))
+        tname, side = self.spawn_queue.pop(0)
         if side == "top":
             p = (random.randint(self.field.left, self.field.right), self.field.top + 6)
         elif side == "bottom":
@@ -183,6 +197,7 @@ class Game:
         self.deployables = []       # 限时召唤物不跨波保留
         self.aiming = None
         self.selected_mech = None
+        self._prepare_wave()        # 预排下一波（出怪边 + 方向预警）
 
     def _flash(self, msg):
         self.message = msg
@@ -362,6 +377,11 @@ class Game:
             return
 
         if ev.button == 1:
+            # 全局技能栏（左上角）可点击释放
+            for gname, rect in self.hud.global_buttons.items():
+                if rect.collidepoint(ev.pos):
+                    self._try_global(gname)
+                    return
             if self.build_selection in ("wall", "tower"):
                 self._place_build(pos)
                 return
@@ -383,6 +403,11 @@ class Game:
                     self.selected_mech.stop()
 
     def _click_hud(self, pos):
+        # 技能槽（所选机兵）可点击释放
+        for slot, rect in self.hud.ability_buttons.items():
+            if rect.collidepoint(pos):
+                self._try_ability(slot)
+                return
         for name, rect in self.hud.buttons.items():
             if rect.collidepoint(pos):
                 if name in ("wall", "tower"):
@@ -723,8 +748,45 @@ class Game:
             ov.fill((255, 255, 255, int(200 * min(1.0, self.term_flash))),
                     special_flags=pygame.BLEND_RGBA_MULT)
             surf.blit(ov, (0, 0))
+        # 出怪方向预警（建造期）
+        if self.state == "BUILD":
+            self._draw_threat_edges(surf)
         # HUD（窗口原生 1× 绘制）
         self.hud.draw(surf, self)
+
+    def _draw_threat_edges(self, surf):
+        """建造期在战场边缘按 threat_dirs 画脉冲红色箭头，预警出怪方向。"""
+        pulse = 0.55 + 0.45 * math.sin(self.anim_time * 4.5)
+        col = (255, int(70 + 60 * pulse), int(70 + 60 * pulse))
+        fh = self.field.bottom
+        for side, n in self.threat_dirs.items():
+            if n <= 0:
+                continue
+            cnt = min(5, 1 + n // 3)        # 箭头数随数量增长
+            for k in range(cnt):
+                f = (k + 1) / (cnt + 1)
+                d = int(14 + 10 * pulse)    # 箭头大小
+                if side in ("top", "bottom"):
+                    x = int(self.field.left + (self.field.right - self.field.left) * f)
+                    y = 8 if side == "top" else fh - 8
+                    dy = d if side == "top" else -d
+                    pts = [(x - d, y), (x + d, y), (x, y + dy)]
+                else:
+                    y = int(self.field.top + (fh - self.field.top) * f)
+                    x = 8 if side == "left" else C.SCREEN_W - 8
+                    dx = d if side == "left" else -d
+                    pts = [(x, y - d), (x, y + d), (x + dx, y)]
+                pygame.draw.polygon(surf, col, pts)
+            # 数量标注
+            lbl = self.fonts["tiny"].render(f"×{n}", True, col)
+            if side == "top":
+                surf.blit(lbl, (C.SCREEN_W // 2 - 12, 30))
+            elif side == "bottom":
+                surf.blit(lbl, (C.SCREEN_W // 2 - 12, fh - 44))
+            elif side == "left":
+                surf.blit(lbl, (30, fh // 2))
+            else:
+                surf.blit(lbl, (C.SCREEN_W - 56, fh // 2))
 
     def _draw_aim_ghost(self, surf, s=1):
         mx, my = pygame.mouse.get_pos()
