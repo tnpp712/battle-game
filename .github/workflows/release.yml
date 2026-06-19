@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 机兵防卫圈 ${{ github.ref_name }}
+          body: |
+            机兵防卫圈 — 崩坏战 ${{ github.ref_name }}
+
+            ## 下载即玩
+            - **macOS**：下载 `BattleGame-macOS.zip`，解压得到 `BattleGame.app`。
+            - **Windows**：下载 `BattleGame.exe`，双击运行。
+
+            ## 首次打开（应用未签名，需手动放行）
+            - **macOS**：右键 `BattleGame.app` → 打开 → 在弹窗里再点「打开」；
+              或终端执行 `xattr -dr com.apple.quarantine BattleGame.app` 后再双击。
+            - **Windows**：若弹出 SmartScreen「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」。
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build .app
+        run: pyinstaller --noconfirm --clean --windowed --name BattleGame main.py
+      - name: Package .app
+        run: ditto -c -k --keepParent "dist/BattleGame.app" "BattleGame-macOS.zip"
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BattleGame-macOS.zip
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Build .exe
+        run: pyinstaller --noconfirm --clean --windowed --onefile --name BattleGame main.py
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BattleGame.exe

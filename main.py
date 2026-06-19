@@ -7,12 +7,21 @@ import config as C
 from game import Game
 
 
-# macOS 上常见的中文字体路径，按优先级尝试
+# 常见中文字体路径，按优先级尝试（macOS 在前，Windows 在后）
 CJK_FONT_CANDIDATES = [
+    # macOS
     "/System/Library/Fonts/PingFang.ttc",
     "/System/Library/Fonts/STHeiti Medium.ttc",
     "/System/Library/Fonts/Hiragino Sans GB.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
+    # Windows（微软雅黑 / 黑体 / 宋体，Win7+ 自带）
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\msyhl.ttc",
+    r"C:\Windows\Fonts\simhei.ttf",
+    r"C:\Windows\Fonts\simsun.ttc",
+    # Linux（常见思源/文泉驿，便于自带 Python 运行）
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
 ]
 
 
@@ -24,7 +33,9 @@ def _font_maker():
     if path:
         return lambda s: pygame.font.Font(path, s)
     # 退而求其次，用系统字体（可能无法显示中文）
-    name = pygame.font.match_font("pingfangsc, stheiti, arialunicode, applegothic") or None
+    name = pygame.font.match_font(
+        "pingfangsc, stheiti, microsoftyahei, simhei, simsun, "
+        "notosanscjksc, wenquanyimicrohei, arialunicode, applegothic") or None
     return lambda s: (pygame.font.Font(name, s) if name else pygame.font.SysFont(None, s))
 
 

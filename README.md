@@ -10,7 +10,18 @@
 
 > 纯 Python + Pygame，**无任何外部素材**——所有单位与特效均为矢量绘制（抗锯齿 + 辉光 + 2× 超采样）。
 
-## 运行
+## 下载即玩（推荐）
+
+到 [**Releases**](https://github.com/tnpp712/battle-game/releases) 下载对应平台的包，双击运行，无需安装 Python：
+
+- **macOS**：下载 `BattleGame-macOS.zip` → 解压 → 双击 `BattleGame.app`
+- **Windows**：下载 `BattleGame.exe` → 双击
+
+> 应用未做代码签名，**首次打开需手动放行**：
+> - macOS：右键 `BattleGame.app` →「打开」→ 弹窗里再点「打开」（或 `xattr -dr com.apple.quarantine BattleGame.app`）
+> - Windows：若弹 SmartScreen，点「更多信息」→「仍要运行」
+
+## 从源码运行（开发者）
 
 ```bash
 pip install -r requirements.txt
