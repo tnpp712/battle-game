@@ -88,7 +88,7 @@ PY
 
 `Game.state` 取值 `MENU / BUILD / WAVE / WON / LOST`，是理解全局行为的关键：
 
-- **MENU**：开局菜单（`reset()` 进入此态）。选难度（`config.DIFFICULTIES`，1/2/3）、无尽开关（E），按 N/空格/回车 `_start_game()` → BUILD 并预排第一波。`update`/`_on_mouse_down` 在 MENU 直接返回；`draw` 走 `_draw_menu` 覆盖层、跳过 HUD。**注意：直接 `start_wave()` 在 MENU 不生效，无窗口测试需先 `_start_game()`**。难度乘子在 `_scale_enemy`（出怪时）与 `_prepare_wave`（数量）施加；无尽模式 `wave_index >= len(WAVES)` 后由 `_endless_wave`/`_wave_interval` 程序化续波、`_wave_cleared` 不判 WON、`score` 计分。
+- **MENU**：开局菜单（`reset()` 进入此态）。选难度（`config.DIFFICULTIES`，1/2/3）、无尽开关（E）、**点击卡片增减出战阵容**（`menu_cards`/`_toggle_squad`，仅已解锁、≤`SQUAD_MAX`），按 N/空格/回车 `_start_game()`（按最终阵容 `_spawn_squad`）→ BUILD 并预排第一波。**解锁/战绩持久化**见 [save.py](save.py)（路径可用环境变量 `BATTLE_GAME_SAVE` 覆盖，测试必须设它以免污染用户目录）：`Game.unlocked`/`Game.save` 整生命周期保留；WON/LOST 时 `_record_result` 更新最佳波/通关数/最高分、按 `config.UNLOCK_RULES` 解锁兵种并落盘（`_ended` 保证只记一次）。`update`/`_on_mouse_down` 在 MENU 直接返回；`draw` 走 `_draw_menu` 覆盖层、跳过 HUD。**注意：直接 `start_wave()` 在 MENU 不生效，无窗口测试需先 `_start_game()`**。难度乘子在 `_scale_enemy`（出怪时）与 `_prepare_wave`（数量）施加；无尽模式 `wave_index >= len(WAVES)` 后由 `_endless_wave`/`_wave_interval` 程序化续波、`_wave_cleared` 不判 WON、`score` 计分。
 - **BUILD**：机兵可被路径指令移动（用于布防前调位），但无敌人、无战斗。按 `N`（`start_wave`）进入 WAVE。
 - **WAVE**：实时推进。可按空格 `paused` 暂停下令（核心机制——暂停时一切冻结，但仍可选机兵、画路径、指定目标，松开后执行）。`_update_wave` 处理出怪、战斗、清理与胜负判定。清波后 `_wave_cleared` 发奖励、复活阵亡机兵、回到 BUILD，全部波次清完则 WON；终端血量归零则 LOST。
 - 按 `R` 任何时候 `reset()` 重开。
@@ -117,7 +117,7 @@ PY
 - `Beam`：攻击/治疗的瞬时连线特效，带 TTL，每帧 `update` 衰减。
 - **可部署物**（技能召唤，限时）：`SentryTurret`（自动炮台）/`SlowField`（减速灼烧力场）/`HealDrone`（治疗无人机）。统一接口 `update(dt, game) -> 存活bool`，存于 `Game.deployables`，在 `_update_wave` 里推进并用 `[d for d in ... if d.update(...)]` 清理；`Game.draw` 经 `sprites.draw_deployable`（按 `type(d).__name__` 分派）绘制。不可被攻击、不是障碍。参数在 `config.SENTRY/SLOW_FIELD/HEAL_DRONE`。
 - **终端全局技能**（不绑机兵，耗资源）：`config.GLOBAL_SKILLS`（轨道炮 Z / 全场过载 X / 时滞力场 C）。`Game._try_global` 校验 `global_cd`+资源 → self 型即放、point 型走瞄准；`Game._do_global` 扣资源、置冷却、按 `effect` 分派效果。冷却在 `_update_wave` 里递减。
-- **机兵兵种**：`config.STARTING_SQUAD` 现为 6 个（近接/炮击/突击/支援/电磁/工程）；电磁=控制（眩晕+减速力场）、工程=召唤（哨戒炮+治疗无人机）。所有机兵共用同一机甲剪影，靠 `color` 与 `sprites._MECH_LABEL` 的字标区分。
+- **机兵兵种**：`config.MECH_POOL` 6 个（近接/炮击/突击/支援/电磁/工程）；初始解锁 `STARTING_UNLOCKED` 4 个，电磁/工程按 `UNLOCK_RULES` 解锁。电磁=控制（眩晕+减速力场）、工程=召唤（哨戒炮+治疗无人机）。出战阵容 `Game.squad`（菜单选，≤`SQUAD_MAX`）决定 `_spawn_squad` 生成哪些。所有机兵共用同一机甲剪影，靠 `color` 与 `sprites._MECH_LABEL` 的字标区分。
 
 实体的朝向 `heading` 在移动时更新，供精灵旋转使用。
 

@@ -12,6 +12,7 @@ from pathfield import FlowField, find_path
 import sprites
 import render
 import audio
+import save
 from particles import Particles
 from sprites import lighten
 
@@ -27,6 +28,9 @@ class Game:
         self.scene = pygame.Surface((C.SCREEN_W * self.rs, self.field.bottom * self.rs))
         self._down = pygame.Surface((C.SCREEN_W, self.field.bottom))
         self._red_vig = self._build_red_vignette()    # 终端受击红闪叠层
+        self.save = save.load()                        # 解锁/战绩存档（整生命周期保留）
+        self.unlocked = list(self.save["unlocked"])
+        self.menu_cards = {}                           # 菜单阵容卡片命中区
         self.reset()
 
     def _build_red_vignette(self):
@@ -50,6 +54,8 @@ class Game:
         self.towers = []
         self.enemies = []
         self.beams = []
+        # 出战阵容（默认带上所有已解锁，至多 SQUAD_MAX）；须在 _spawn_squad 前就绪
+        self.squad = list(self.unlocked)[:C.SQUAD_MAX]
         self.mechs = self._spawn_squad()
 
         self.resources = C.START_RESOURCES
@@ -61,6 +67,7 @@ class Game:
         self.endless = False
         self.score = 0
         self.kills = 0
+        self._ended = False         # 战绩是否已结算（WON/LOST 仅记一次）
 
         self.state = "MENU"         # MENU / BUILD / WAVE / WON / LOST
         self.paused = False
@@ -119,9 +126,9 @@ class Game:
     def _spawn_squad(self):
         mechs = []
         cx, cy = self.terminal.pos
-        n = len(C.STARTING_SQUAD)
-        import math
-        for i, t in enumerate(C.STARTING_SQUAD):
+        squad = self.squad or list(C.STARTING_UNLOCKED)
+        n = max(1, len(squad))
+        for i, t in enumerate(squad):
             ang = (i / n) * math.tau
             p = Vector2(cx + math.cos(ang) * 110, cy + math.sin(ang) * 110)
             mechs.append(Mech(t, p))
@@ -239,6 +246,7 @@ class Game:
         # 通关判定：固定波打完后，无尽模式继续、否则胜利
         if self.wave_index >= len(C.WAVES) and not self.endless:
             self.state = "WON"
+            self._record_result()      # 立即结算落盘，避免重开/退出丢失
             audio.play("win")
         else:
             self.state = "BUILD"
@@ -313,9 +321,46 @@ class Game:
                 self.wall_vertical = not self.wall_vertical
 
     def _start_game(self):
-        """从菜单进入：按所选难度开局，预排第一波。"""
+        """从菜单进入：按所选阵容/难度开局，预排第一波。"""
+        if not self.squad:
+            self.squad = list(self.unlocked)[:C.SQUAD_MAX] or [C.STARTING_UNLOCKED[0]]
+        self.mechs = self._spawn_squad()    # 按最终出战阵容重建
         self.state = "BUILD"
         self._prepare_wave()
+
+    def _toggle_squad(self, mtype):
+        """菜单里点击切换出战阵容（仅已解锁，至少 1 个，至多 SQUAD_MAX）。"""
+        if mtype not in self.unlocked:
+            return
+        if mtype in self.squad:
+            if len(self.squad) > 1:
+                self.squad.remove(mtype)
+        elif len(self.squad) < C.SQUAD_MAX:
+            self.squad.append(mtype)
+        else:
+            self._flash(f"出战上限 {C.SQUAD_MAX}")
+
+    def _record_result(self):
+        """WON/LOST 结算：更新最佳战绩、检查解锁、持久化（仅一次）。"""
+        if self._ended:
+            return
+        self._ended = True
+        s = self.save
+        s["best_wave"] = max(s.get("best_wave", 0), self.wave_index)
+        s["best_score"] = max(s.get("best_score", 0), self.score)
+        if self.state == "WON":
+            s["wins"] = s.get("wins", 0) + 1
+        newly = []
+        for mtype, rule in C.UNLOCK_RULES.items():
+            if mtype in self.unlocked:
+                continue
+            if s["best_wave"] >= rule.get("best_wave", 1e9) or s["wins"] >= rule.get("wins", 1e9):
+                self.unlocked.append(mtype)
+                newly.append(mtype)
+        s["unlocked"] = list(self.unlocked)
+        save.save(s)
+        if newly:
+            self._flash("解锁兵种：" + "、".join(newly))
 
     def _on_key(self, key):
         if key == pygame.K_r:
@@ -478,6 +523,11 @@ class Game:
     def _on_mouse_down(self, ev):
         pos = Vector2(ev.pos)
         if self.state == "MENU":
+            if ev.button == 1:
+                for mtype, rect in self.menu_cards.items():
+                    if rect.collidepoint(ev.pos):
+                        self._toggle_squad(mtype)
+                        return
             return
         # HUD 区域点击
         if ev.pos[1] >= C.SCREEN_H - C.HUD_H:
@@ -731,6 +781,8 @@ class Game:
         if self._flow_dirty:
             self._rebuild_flow()
 
+        if self.state in ("WON", "LOST"):
+            self._record_result()    # 兜底（已记则 no-op）
         if self.state in ("MENU", "WON", "LOST"):
             return
 
@@ -877,6 +929,7 @@ class Game:
         # 判负
         if not self.terminal.alive:
             self.state = "LOST"
+            self._record_result()      # 立即结算落盘，避免重开/退出丢失
             audio.play("lose")
             return
         # 判定波次结束
@@ -968,29 +1021,61 @@ class Game:
         self.hud.draw(surf, self)
 
     def _draw_menu(self, surf):
-        """开局菜单：选难度 + 无尽开关 + 开始。"""
+        """开局菜单：选难度 + 无尽开关 + 出战阵容（可点击）+ 开始。"""
         ov = pygame.Surface((C.SCREEN_W, C.SCREEN_H), pygame.SRCALPHA)
-        ov.fill((6, 9, 16, 205))
+        ov.fill((6, 9, 16, 210))
         surf.blit(ov, (0, 0))
         cx = C.SCREEN_W // 2
+        self.menu_cards = {}
 
-        def text(s, y, font, col):
+        def text(s, y, font, col, x=None):
             img = font.render(s, True, col)
-            surf.blit(img, img.get_rect(center=(cx, y)))
+            surf.blit(img, img.get_rect(center=(cx if x is None else x, y)))
 
-        text("机兵防卫圈 — 崩坏战", 150, self.fonts["big"], C.C_TERMINAL)
-        text("选择难度", 238, self.fonts["mid"], C.C_TEXT)
+        text("机兵防卫圈 — 崩坏战", 96, self.fonts["big"], C.C_TERMINAL)
+        text("选择难度", 168, self.fonts["mid"], C.C_TEXT)
         for i, name in enumerate(C.DIFFICULTY_ORDER):
             sel = (name == self.difficulty)
-            col = C.C_SELECT if sel else C.C_TEXT_DIM
             d = C.DIFFICULTIES[name]
             mark = "▶ " if sel else "   "
-            text(f"{mark}[{i + 1}] {name}    血量×{d['hp']:.2f}  数量×{d['count']:.2f}  奖励×{d['reward']:.2f}",
-                 286 + i * 36, self.fonts["small"], col)
-        text(f"[E] 无尽模式：{'开' if self.endless else '关'}", 420, self.fonts["mid"],
+            text(f"{mark}[{i + 1}] {name}   血量×{d['hp']:.2f} 数量×{d['count']:.2f} 奖励×{d['reward']:.2f}",
+                 206 + i * 30, self.fonts["small"], C.C_SELECT if sel else C.C_TEXT_DIM)
+        text(f"[E] 无尽模式：{'开' if self.endless else '关'}", 312, self.fonts["small"],
              C.C_TEXT_GOOD if self.endless else C.C_TEXT_DIM)
-        text("按  N / 空格 / 回车  开始", 496, self.fonts["mid"], C.C_TEXT_WARN)
-        text("游戏中按 R 随时重开并回到此菜单", 542, self.fonts["small"], C.C_TEXT_DIM)
+        # 出战阵容
+        text(f"出战阵容（点击增减，已选 {len(self.squad)}/{C.SQUAD_MAX}）",
+             352, self.fonts["small"], C.C_TEXT)
+        cw, ch, gap = 108, 78, 10
+        total = len(C.MECH_POOL) * cw + (len(C.MECH_POOL) - 1) * gap
+        x0 = cx - total // 2
+        y0 = 372
+        for i, mtype in enumerate(C.MECH_POOL):
+            rect = pygame.Rect(x0 + i * (cw + gap), y0, cw, ch)
+            self.menu_cards[mtype] = rect
+            unlocked = mtype in self.unlocked
+            selected = mtype in self.squad
+            fill = (44, 62, 46) if selected else (26, 32, 46) if unlocked else (18, 20, 28)
+            border = C.C_SELECT if selected else (70, 120, 165) if unlocked else (48, 52, 64)
+            pygame.draw.rect(surf, fill, rect, border_radius=8)
+            pygame.draw.rect(surf, border, rect, 2, border_radius=8)
+            col = C.MECH_TYPES[mtype]["color"] if unlocked else (70, 74, 88)
+            render.aacircle(surf, col, (rect.centerx, rect.top + 26), 15)
+            lbl = sprites._MECH_LABEL.get(mtype, mtype[0])
+            li = self.wfonts["tiny"].render(lbl, True, (12, 15, 22))
+            # wfonts 偏大，缩放贴合圆心
+            li = pygame.transform.smoothscale(li, (li.get_width() // 2, li.get_height() // 2))
+            surf.blit(li, li.get_rect(center=(rect.centerx, rect.top + 26)))
+            text(mtype, rect.top + 52, self.fonts["tiny"],
+                 C.C_TEXT if unlocked else C.C_TEXT_DIM, x=rect.centerx)
+            if not unlocked:
+                rule = C.UNLOCK_RULES.get(mtype, {})
+                hint = f"需{rule.get('best_wave','?')}波"
+                text(hint, rect.top + 67, self.fonts["tiny"], (150, 140, 90), x=rect.centerx)
+        text("按  N / 空格 / 回车  开始", 484, self.fonts["mid"], C.C_TEXT_WARN)
+        bw = self.save.get("best_wave", 0)
+        text(f"历史最佳：{bw} 波 · 通关 {self.save.get('wins', 0)} 次 ·"
+             f" 最高分 {self.save.get('best_score', 0)}    （游戏中 R 重开回菜单）",
+             528, self.fonts["small"], C.C_TEXT_DIM)
 
     def _draw_threat_edges(self, surf):
         """建造期在战场边缘按 threat_dirs 画脉冲红色箭头，预警出怪方向。"""

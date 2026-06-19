@@ -11,6 +11,8 @@ import os
 
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
+os.environ["BATTLE_GAME_SAVE"] = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              ".smoke_save.json")   # 隔离存档，避免污染用户目录
 
 import pygame
 from pygame.math import Vector2
