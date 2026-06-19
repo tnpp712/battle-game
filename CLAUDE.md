@@ -29,7 +29,7 @@ import os; os.environ["SDL_VIDEODRIVER"]="dummy"; os.environ["SDL_AUDIODRIVER"]=
 import pygame; from game import Game; from main import load_fonts
 import config as C
 pygame.init(); screen=pygame.display.set_mode((C.SCREEN_W,C.SCREEN_H))
-fonts, wfonts = load_fonts(); g=Game(fonts, wfonts); g.start_wave()
+fonts, wfonts = load_fonts(); g=Game(fonts, wfonts); g._start_game(); g.start_wave()
 for _ in range(60*60*3):
     g.update(1/60); g.draw(screen)
     if g.state=="BUILD": g.start_wave()
@@ -48,7 +48,7 @@ import os; os.environ["SDL_VIDEODRIVER"]="dummy"; os.environ["SDL_AUDIODRIVER"]=
 import pygame; from game import Game; from main import load_fonts
 import config as C; from pygame.math import Vector2
 pygame.init(); screen=pygame.display.set_mode((C.SCREEN_W,C.SCREEN_H))
-fonts, wfonts = load_fonts(); g=Game(fonts, wfonts); g.start_wave()
+fonts, wfonts = load_fonts(); g=Game(fonts, wfonts); g._start_game(); g.start_wave()
 for _ in range(90): g.update(1/60)
 TP=Vector2(g.terminal.pos)+Vector2(50,0)
 def click(x,y,b=1):
@@ -86,8 +86,9 @@ PY
 
 ### 状态机
 
-`Game.state` 取值 `BUILD / WAVE / WON / LOST`，是理解全局行为的关键：
+`Game.state` 取值 `MENU / BUILD / WAVE / WON / LOST`，是理解全局行为的关键：
 
+- **MENU**：开局菜单（`reset()` 进入此态）。选难度（`config.DIFFICULTIES`，1/2/3）、无尽开关（E），按 N/空格/回车 `_start_game()` → BUILD 并预排第一波。`update`/`_on_mouse_down` 在 MENU 直接返回；`draw` 走 `_draw_menu` 覆盖层、跳过 HUD。**注意：直接 `start_wave()` 在 MENU 不生效，无窗口测试需先 `_start_game()`**。难度乘子在 `_scale_enemy`（出怪时）与 `_prepare_wave`（数量）施加；无尽模式 `wave_index >= len(WAVES)` 后由 `_endless_wave`/`_wave_interval` 程序化续波、`_wave_cleared` 不判 WON、`score` 计分。
 - **BUILD**：机兵可被路径指令移动（用于布防前调位），但无敌人、无战斗。按 `N`（`start_wave`）进入 WAVE。
 - **WAVE**：实时推进。可按空格 `paused` 暂停下令（核心机制——暂停时一切冻结，但仍可选机兵、画路径、指定目标，松开后执行）。`_update_wave` 处理出怪、战斗、清理与胜负判定。清波后 `_wave_cleared` 发奖励、复活阵亡机兵、回到 BUILD，全部波次清完则 WON；终端血量归零则 LOST。
 - 按 `R` 任何时候 `reset()` 重开。

@@ -167,3 +167,13 @@ WAVES = [
 ]
 
 START_RESOURCES = 120
+
+# ---------- 难度 ----------
+# hp/speed/count/reward 为对敌人对应数值的乘子
+DIFFICULTIES = {
+    "简单": dict(hp=0.75, speed=0.9,  count=0.8,  reward=1.25),
+    "普通": dict(hp=1.0,  speed=1.0,  count=1.0,  reward=1.0),
+    "困难": dict(hp=1.4,  speed=1.1,  count=1.25, reward=0.85),
+}
+DIFFICULTY_ORDER = ["简单", "普通", "困难"]
+DEFAULT_DIFFICULTY = "普通"

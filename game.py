@@ -56,8 +56,13 @@ class Game:
         self.wave_index = 0
         self.spawn_queue = []
         self.spawn_timer = 0.0
+        # 难度 / 模式 / 计分
+        self.difficulty = C.DEFAULT_DIFFICULTY
+        self.endless = False
+        self.score = 0
+        self.kills = 0
 
-        self.state = "BUILD"        # BUILD / WAVE / WON / LOST
+        self.state = "MENU"         # MENU / BUILD / WAVE / WON / LOST
         self.paused = False
         self.build_selection = None
         self.wall_vertical = False
@@ -80,7 +85,7 @@ class Game:
         self.hitstop = 0.0          # >0 时战斗短暂冻结（命中顿帧）
         self.term_flash = 0.0       # 终端受击红闪强度 0..1
         self.threat_dirs = {"top": 0, "bottom": 0, "left": 0, "right": 0}
-        self._prepare_wave()        # 预排第一波（出怪边 + 方向预警）
+        # 第一波在玩家于菜单选好难度后 _start_game 里预排
 
         self.flow = FlowField(self.field)
         self._flow_dirty = False
@@ -134,16 +139,44 @@ class Game:
     def enemies_remaining(self):
         return len(self.enemies) + len(self.spawn_queue)
 
+    def _wave_composition(self):
+        """当前波的敌人构成：固定波取 WAVES，超出后无尽模式程序化生成。"""
+        if self.wave_index < len(C.WAVES):
+            return C.WAVES[self.wave_index]["enemies"]
+        if self.endless:
+            return self._endless_wave(self.wave_index - len(C.WAVES) + 1)
+        return []
+
+    def _endless_wave(self, lvl):
+        comp = [("蛛型", 6 + lvl * 2), ("飞蝗", 3 + lvl), ("远程兵", 2 + lvl // 2)]
+        if lvl >= 2:
+            comp.append(("重甲", 1 + lvl // 2))
+            comp.append(("分裂体", 1 + lvl // 2))
+        if lvl >= 3:
+            comp.append(("护盾兵", 1 + lvl // 3))
+        if lvl >= 4:
+            comp.append(("治疗兵", 1 + lvl // 4))
+        if lvl % 4 == 0:
+            comp.append(("首领", 1 + lvl // 8))
+        return comp
+
+    def _wave_interval(self):
+        if self.wave_index < len(C.WAVES):
+            return C.WAVES[self.wave_index]["interval"]
+        return max(0.4, 0.7 - 0.02 * self._endless_level())
+
     def _prepare_wave(self):
         """进入 BUILD 时预排下一波：给每个敌人预定出怪边，供方向预警与出怪共用。"""
         self.threat_dirs = {"top": 0, "bottom": 0, "left": 0, "right": 0}
         self.spawn_queue = []
-        if self.wave_index >= len(C.WAVES):
+        comp = self._wave_composition()
+        if not comp:
             return
+        cmult = C.DIFFICULTIES[self.difficulty]["count"]
         sides = ("top", "bottom", "left", "right")
         plan = []
-        for tname, count in C.WAVES[self.wave_index]["enemies"]:
-            for _ in range(count):
+        for tname, count in comp:
+            for _ in range(max(1, round(count * cmult))):
                 side = random.choice(sides)
                 plan.append((tname, side))
                 self.threat_dirs[side] += 1
@@ -170,14 +203,41 @@ class Game:
             p = (self.field.left + 6, random.randint(self.field.top, self.field.bottom))
         else:
             p = (self.field.right - 6, random.randint(self.field.top, self.field.bottom))
-        self.enemies.append(Enemy(tname, p))
+        e = Enemy(tname, p)
+        self._scale_enemy(e)
+        self.enemies.append(e)
+
+    def _endless_level(self):
+        """当前无尽层级（>=1 表示已进入无尽波），固定波内为 0。"""
+        return max(0, self.wave_index - len(C.WAVES) + 1) if self.wave_index >= len(C.WAVES) else 0
+
+    def _scale_enemy(self, e):
+        """按难度与无尽层级缩放敌人数值。"""
+        d = C.DIFFICULTIES[self.difficulty]
+        hp_mult = d["hp"]
+        spd_mult = d["speed"]
+        lvl = self._endless_level()
+        if lvl > 0:
+            hp_mult *= (1 + 0.14 * lvl)
+            spd_mult *= min(1.5, 1 + 0.02 * lvl)
+            e.damage *= (1 + 0.06 * lvl)
+        e.max_hp = e.max_hp * hp_mult
+        e.hp = e.max_hp
+        e.speed *= spd_mult
+        e.shield = e.shield * hp_mult
+        e.reward = max(1, int(e.reward * d["reward"]))
 
     def _wave_cleared(self):
-        reward = C.WAVES[self.wave_index]["reward"]
+        if self.wave_index < len(C.WAVES):
+            reward = C.WAVES[self.wave_index]["reward"]
+        else:
+            reward = 150 + 30 * self._endless_level()    # 无尽波奖励
         self.resources += reward
+        self.score += reward
         self._flash(f"第 {self.wave_index + 1} 波清除！获得资源 {reward}")
         self.wave_index += 1
-        if self.wave_index >= len(C.WAVES):
+        # 通关判定：固定波打完后，无尽模式继续、否则胜利
+        if self.wave_index >= len(C.WAVES) and not self.endless:
             self.state = "WON"
             audio.play("win")
         else:
@@ -252,9 +312,22 @@ class Game:
             if self.build_selection == "wall":
                 self.wall_vertical = not self.wall_vertical
 
+    def _start_game(self):
+        """从菜单进入：按所选难度开局，预排第一波。"""
+        self.state = "BUILD"
+        self._prepare_wave()
+
     def _on_key(self, key):
         if key == pygame.K_r:
             self.reset()
+            return
+        if self.state == "MENU":
+            if key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                self.difficulty = C.DIFFICULTY_ORDER[key - pygame.K_1]
+            elif key == pygame.K_e:
+                self.endless = not self.endless
+            elif key in (pygame.K_n, pygame.K_RETURN, pygame.K_SPACE):
+                self._start_game()
             return
         if self.state in ("WON", "LOST"):
             return
@@ -404,6 +477,8 @@ class Game:
 
     def _on_mouse_down(self, ev):
         pos = Vector2(ev.pos)
+        if self.state == "MENU":
+            return
         # HUD 区域点击
         if ev.pos[1] >= C.SCREEN_H - C.HUD_H:
             self.aiming = None
@@ -656,7 +731,7 @@ class Game:
         if self._flow_dirty:
             self._rebuild_flow()
 
-        if self.state in ("WON", "LOST"):
+        if self.state in ("MENU", "WON", "LOST"):
             return
 
         # 命中顿帧：短暂冻结战斗与移动，但特效继续播
@@ -728,7 +803,7 @@ class Game:
             self.spawn_timer -= dt
             if self.spawn_timer <= 0:
                 self._spawn_one()
-                self.spawn_timer = C.WAVES[self.wave_index]["interval"]
+                self.spawn_timer = self._wave_interval()
 
         # 敌人
         for e in self.enemies:
@@ -766,6 +841,8 @@ class Game:
                 survivors.append(e)
             else:
                 self.resources += e.reward
+                self.score += e.reward
+                self.kills += 1
                 self.particles.explosion(e.pos, e.color, n=34 if e.boss else 20)
                 audio.play("explosion", vol=0.7, throttle=0.05)
                 # 大型单位死亡给点震屏
@@ -780,7 +857,9 @@ class Game:
                         off = Vector2(random.uniform(-1, 1), random.uniform(-1, 1))
                         if off.length_squared() < 0.01:
                             off = Vector2(1, 0)
-                        spawned.append(Enemy(ctype, e.pos + off.normalize() * (e.radius + 6)))
+                        child = Enemy(ctype, e.pos + off.normalize() * (e.radius + 6))
+                        self._scale_enemy(child)    # 子代同样吃难度/无尽缩放
+                        spawned.append(child)
         survivors.extend(spawned)
         self.enemies = survivors
         before = len(self.walls)
@@ -869,6 +948,10 @@ class Game:
             ov.fill((255, 255, 255, int(200 * min(1.0, self.term_flash))),
                     special_flags=pygame.BLEND_RGBA_MULT)
             surf.blit(ov, (0, 0))
+        # 开局菜单：覆盖在背景上，跳过 HUD
+        if self.state == "MENU":
+            self._draw_menu(surf)
+            return
         # 出怪方向预警（建造期）
         if self.state == "BUILD":
             self._draw_threat_edges(surf)
@@ -883,6 +966,31 @@ class Game:
             pygame.draw.rect(surf, (140, 230, 170), r, 1)
         # HUD（窗口原生 1× 绘制）
         self.hud.draw(surf, self)
+
+    def _draw_menu(self, surf):
+        """开局菜单：选难度 + 无尽开关 + 开始。"""
+        ov = pygame.Surface((C.SCREEN_W, C.SCREEN_H), pygame.SRCALPHA)
+        ov.fill((6, 9, 16, 205))
+        surf.blit(ov, (0, 0))
+        cx = C.SCREEN_W // 2
+
+        def text(s, y, font, col):
+            img = font.render(s, True, col)
+            surf.blit(img, img.get_rect(center=(cx, y)))
+
+        text("机兵防卫圈 — 崩坏战", 150, self.fonts["big"], C.C_TERMINAL)
+        text("选择难度", 238, self.fonts["mid"], C.C_TEXT)
+        for i, name in enumerate(C.DIFFICULTY_ORDER):
+            sel = (name == self.difficulty)
+            col = C.C_SELECT if sel else C.C_TEXT_DIM
+            d = C.DIFFICULTIES[name]
+            mark = "▶ " if sel else "   "
+            text(f"{mark}[{i + 1}] {name}    血量×{d['hp']:.2f}  数量×{d['count']:.2f}  奖励×{d['reward']:.2f}",
+                 286 + i * 36, self.fonts["small"], col)
+        text(f"[E] 无尽模式：{'开' if self.endless else '关'}", 420, self.fonts["mid"],
+             C.C_TEXT_GOOD if self.endless else C.C_TEXT_DIM)
+        text("按  N / 空格 / 回车  开始", 496, self.fonts["mid"], C.C_TEXT_WARN)
+        text("游戏中按 R 随时重开并回到此菜单", 542, self.fonts["small"], C.C_TEXT_DIM)
 
     def _draw_threat_edges(self, surf):
         """建造期在战场边缘按 threat_dirs 画脉冲红色箭头，预警出怪方向。"""

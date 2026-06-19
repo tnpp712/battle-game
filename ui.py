@@ -318,19 +318,23 @@ class HUD:
             x += w + gap
 
     def _draw_banner(self, surf, game):
+        wlabel = (f"无尽 第 {game.wave_index + 1} 波" if game.wave_index >= len(C.WAVES)
+                  else f"第 {game.wave_index + 1} 波 / {len(C.WAVES)}")
         if game.state == "BUILD":
-            self._text(surf, f"建造阶段 — 布防后按 N 开始第 {game.wave_index + 1} 波",
+            self._text(surf, f"建造阶段 — 布防后按 N 开始（{wlabel}）",
                        C.SCREEN_W // 2, 26, self.f_mid, C.C_TEXT_WARN, center=True)
         elif game.state == "WAVE":
             if game.paused:
                 self._text(surf, "⏸ 暂停 — 下达指令中（空格继续）", C.SCREEN_W // 2, 26,
                            self.f_mid, C.C_SELECT, center=True)
-            self._text(surf, f"第 {game.wave_index + 1} 波   剩余敌人 {game.enemies_remaining()}",
+            extra = f"   得分 {game.score}" if game.endless else ""
+            self._text(surf, f"{wlabel}   剩余敌人 {game.enemies_remaining()}{extra}",
                        C.SCREEN_W // 2, 52, self.f_small, C.C_TEXT_DIM, center=True)
         elif game.state == "WON":
             self._center_big(surf, "防卫成功！", C.C_TEXT_GOOD, "按 R 重新开始")
         elif game.state == "LOST":
-            self._center_big(surf, "终端被摧毁…", C.C_TEXT_BAD, "按 R 重新开始")
+            sub = f"得分 {game.score} · 按 R 重新开始" if game.endless else "按 R 重新开始"
+            self._center_big(surf, "终端被摧毁…", C.C_TEXT_BAD, sub)
 
     def _center_big(self, surf, title, color, sub):
         cx, cy = C.SCREEN_W // 2, (C.SCREEN_H - C.HUD_H) // 2

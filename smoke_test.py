@@ -22,7 +22,9 @@ from main import load_fonts
 
 def _new_game():
     fonts, wfonts = load_fonts()
-    return Game(fonts, wfonts)
+    g = Game(fonts, wfonts)
+    g._start_game()      # 跳过开局菜单（MENU → BUILD）
+    return g
 
 
 def logic_smoke(screen):
