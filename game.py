@@ -61,7 +61,11 @@ class Game:
         self.paused = False
         self.build_selection = None
         self.wall_vertical = False
-        self.selected_mech = None
+        self.selected = []          # 当前选中的机兵组
+        self.selected_mech = None   # 主选（用于 HUD/技能），= selected[0]
+        self.groups = {i: [] for i in range(1, 7)}   # 数字编组
+        self._press = None          # 左键按下信息：("mech"/"empty", 起点)
+        self.box = None             # 框选矩形 (start, end) 或 None
         self.aiming = None          # dict(radius, src, cast) 等待点位的技能瞄准
         self.deployables = []       # 限时召唤物（哨戒炮/力场/无人机）
         self.global_cd = {k: 0.0 for k in C.GLOBAL_SKILLS}
@@ -196,6 +200,9 @@ class Game:
             m.ability_timers = [0.0 for _ in m.abilities]
         self.deployables = []       # 限时召唤物不跨波保留
         self.aiming = None
+        for m in self.mechs:
+            m.selected = False
+        self.selected = []
         self.selected_mech = None
         self._prepare_wave()        # 预排下一波（出怪边 + 方向预警）
 
@@ -212,9 +219,35 @@ class Game:
         elif ev.type == pygame.MOUSEMOTION:
             if self.drawing_path:
                 self._extend_path(Vector2(ev.pos))
+            elif self.box is not None:
+                self.box = (self.box[0], Vector2(ev.pos))
+            elif self._press is not None:
+                kind, start = self._press[0], self._press[1]
+                p = Vector2(ev.pos)
+                if start.distance_to(p) > 6 and ev.pos[1] < C.SCREEN_H - C.HUD_H:
+                    if kind == "mech" and self.selected_mech is not None and self.selected_mech.alive:
+                        self.drawing_path = True
+                        self.draw_points = [Vector2(self.selected_mech.pos), p]
+                        self.path_valid = True
+                    else:           # 空地拖拽 → 框选
+                        self.box = (start, p)
+                    self._press = None
         elif ev.type == pygame.MOUSEBUTTONUP:
-            if ev.button == 1 and self.drawing_path:
-                self._finish_path()
+            if ev.button == 1:
+                if self.drawing_path:
+                    self._finish_path()
+                elif self.box is not None:
+                    self._set_selection(self._mechs_in_rect(*self.box))
+                    self.box = None
+                elif self._press is not None:
+                    if self._press[0] == "mech":
+                        # 在机兵上普通点击（未拖拽）→ 收敛为单选
+                        self._set_selection([self._press[2]])
+                    elif self.selected:     # 空地点击：有选中则移动到点
+                        self._move_group(self._press[1])
+                    else:
+                        self._set_selection([])
+                self._press = None
         elif ev.type == pygame.MOUSEWHEEL:
             if self.build_selection == "wall":
                 self.wall_vertical = not self.wall_vertical
@@ -234,9 +267,7 @@ class Game:
                 self.aiming = None
                 return
             self.build_selection = None
-            if self.selected_mech:
-                self.selected_mech.selected = False
-            self.selected_mech = None
+            self._set_selection([])
         elif key == pygame.K_q:
             self._try_ability(0)
         elif key == pygame.K_e:
@@ -252,22 +283,36 @@ class Game:
         elif key == pygame.K_TAB:
             if self.build_selection == "wall":
                 self.wall_vertical = not self.wall_vertical
-        # 建造快捷键
-        elif key == pygame.K_1:
-            self._toggle_build("wall")
-        elif key == pygame.K_2:
-            self._toggle_build("tower")
-        elif key == pygame.K_3:
-            self._buy_upgrade("repair")
-        elif key == pygame.K_4:
-            self._buy_upgrade("shield")
-        elif key == pygame.K_5:
-            self._buy_upgrade("radar")
+        elif pygame.K_1 <= key <= pygame.K_6:
+            self._number_key(key - pygame.K_0)
+
+    def _number_key(self, n):
+        """数字键：Ctrl 设编组；战斗中选组；否则（1-5）建造快捷键。"""
+        mods = pygame.key.get_mods()
+        if mods & pygame.KMOD_CTRL:
+            self.groups[n] = [m for m in self.selected if m.alive]
+            self._flash(f"编组 {n}：{len(self.groups[n])} 兵")
+            return
+        if self.state == "WAVE" and self.groups.get(n):
+            alive = [m for m in self.groups[n] if m.alive]
+            if alive:
+                self._set_selection(alive)
+                return
+        # 回落到建造快捷键
+        builds = {1: ("wall", "toggle"), 2: ("tower", "toggle"),
+                  3: ("repair", "buy"), 4: ("shield", "buy"), 5: ("radar", "buy")}
+        if n in builds:
+            name, kind = builds[n]
+            if kind == "toggle":
+                self._toggle_build(name)
+            else:
+                self._buy_upgrade(name)
 
     def _toggle_build(self, name):
         self.build_selection = None if self.build_selection == name else name
-        if self.selected_mech:
-            self.selected_mech.selected = False
+        for m in self.mechs:
+            m.selected = False
+        self.selected = []
         self.selected_mech = None
 
     # ---------------- 技能 ----------------
@@ -385,22 +430,29 @@ class Game:
             if self.build_selection in ("wall", "tower"):
                 self._place_build(pos)
                 return
-            # 选中机兵 or 开始画路径
+            shift = pygame.key.get_mods() & pygame.KMOD_SHIFT
             m = self._mech_at(pos)
             if m is not None:
-                self._select_mech(m)
-            elif self.selected_mech is not None and self.selected_mech.alive:
-                self.drawing_path = True
-                self.draw_points = [Vector2(self.selected_mech.pos), Vector2(pos)]
-                self.path_valid = True
+                if shift:
+                    self._toggle_select(m)
+                    self._press = None
+                else:
+                    if m not in self.selected:
+                        self._set_selection([m])
+                    self._press = ("mech", Vector2(pos), m)
+            else:
+                self._press = ("empty", Vector2(pos))
         elif ev.button == 3:
-            if self.selected_mech is not None and self.selected_mech.alive:
+            grp = [x for x in self.selected if x.alive]
+            if grp:
                 e = self._enemy_at(pos)
                 if e is not None:
-                    self.selected_mech.forced_target = e
+                    for x in grp:
+                        x.forced_target = e
                     self._flash("已指定攻击目标")
                 else:
-                    self.selected_mech.stop()
+                    for x in grp:
+                        x.stop()
 
     def _click_hud(self, pos):
         # 技能槽（所选机兵）可点击释放
@@ -416,12 +468,26 @@ class Game:
                     self._buy_upgrade(name)
                 return
 
-    def _select_mech(self, m):
+    def _set_selection(self, mechs):
+        """设定选中组：刷新各机兵 selected 标记，主选取第一个。"""
         self.build_selection = None
-        if self.selected_mech:
-            self.selected_mech.selected = False
-        self.selected_mech = m
-        m.selected = True
+        chosen = [m for m in mechs if m.alive]
+        for m in self.mechs:
+            m.selected = m in chosen
+        self.selected = chosen
+        self.selected_mech = chosen[0] if chosen else None
+
+    def _toggle_select(self, m):
+        sel = list(self.selected)
+        if m in sel:
+            sel.remove(m)
+        else:
+            sel.append(m)
+        self._set_selection(sel)
+
+    def _mechs_in_rect(self, a, b):
+        r = pygame.Rect(min(a.x, b.x), min(a.y, b.y), abs(a.x - b.x), abs(a.y - b.y))
+        return [m for m in self.mechs if m.alive and r.collidepoint(m.pos.x, m.pos.y)]
 
     def _mech_at(self, pos):
         best = None
@@ -452,18 +518,22 @@ class Game:
 
     def _finish_path(self):
         self.drawing_path = False
-        m = self.selected_mech
-        if len(self.draw_points) < 2 or m is None:
-            self.draw_points = []
+        pts = self.draw_points
+        self.draw_points = []
+        grp = [m for m in self.selected if m.alive]
+        if len(pts) < 2 or not grp:
             return
+        if len(grp) > 1:
+            # 多选：把徒手路径终点当作集结点，编队移动
+            self._move_group(pts[-1])
+            return
+        m = grp[0]
         obstacles = self.obstacle_rects()
-        if not path_blocked(self.draw_points, obstacles):
-            # 手绘路径本身可行，直接采用（去掉首点=机兵当前位置）
-            m.set_path(self.draw_points[1:])
+        if not path_blocked(pts, obstacles):
+            m.set_path(pts[1:])     # 徒手路径可行，直接采用（去掉首点）
             m.forced_target = None
         else:
-            # 路径被障碍挡住：自动寻一条绕行路线到终点
-            goal = self.draw_points[-1]
+            goal = pts[-1]
             route = find_path(self.field, obstacles, m.pos, goal, clearance=m.radius + 2)
             if route and len(route) >= 2:
                 m.set_path(route[1:])
@@ -471,7 +541,46 @@ class Game:
                 self._flash("自动绕行")
             else:
                 self._flash("无法到达目标")
-        self.draw_points = []
+
+    def _formation(self, goal, n):
+        """围绕 goal 排出 n 个不重叠的集结点（网格阵）。"""
+        goal = Vector2(goal)
+        if n <= 1:
+            return [goal]
+        spacing = 42
+        cols = int(math.ceil(math.sqrt(n)))
+        rows = int(math.ceil(n / cols))
+        slots = []
+        for i in range(n):
+            r, c = divmod(i, cols)
+            x = goal.x + (c - (cols - 1) / 2) * spacing
+            y = goal.y + (r - (rows - 1) / 2) * spacing
+            x = max(self.field.left + 10, min(self.field.right - 10, x))
+            y = max(self.field.top + 10, min(self.field.bottom - 10, y))
+            slots.append(Vector2(x, y))
+        return slots
+
+    def _move_group(self, goal):
+        """编队移动：每个机兵分配一个集结点，逐个寻路。"""
+        grp = [m for m in self.selected if m.alive]
+        if not grp:
+            return
+        obstacles = self.obstacle_rects()
+        slots = self._formation(Vector2(goal), len(grp))
+        blocked = 0
+        for m, slot in zip(grp, slots):
+            if not path_blocked([m.pos, slot], obstacles):
+                m.set_path([slot])
+                m.forced_target = None
+            else:
+                route = find_path(self.field, obstacles, m.pos, slot, clearance=m.radius + 2)
+                if route and len(route) >= 2:
+                    m.set_path(route[1:])
+                    m.forced_target = None
+                else:
+                    blocked += 1    # 无法到达：不设置穿障路径（与单选徒手路径一致）
+        if blocked:
+            self._flash("部分机兵无法到达目标")
 
     # ---------------- 建造 ----------------
     def _place_build(self, pos):
@@ -751,6 +860,15 @@ class Game:
         # 出怪方向预警（建造期）
         if self.state == "BUILD":
             self._draw_threat_edges(surf)
+        # 框选矩形
+        if self.box is not None:
+            a, b = self.box
+            r = pygame.Rect(int(min(a.x, b.x)), int(min(a.y, b.y)),
+                            int(abs(a.x - b.x)), int(abs(a.y - b.y)))
+            box_s = pygame.Surface((max(1, r.w), max(1, r.h)), pygame.SRCALPHA)
+            box_s.fill((120, 220, 160, 40))
+            surf.blit(box_s, r.topleft)
+            pygame.draw.rect(surf, (140, 230, 170), r, 1)
         # HUD（窗口原生 1× 绘制）
         self.hud.draw(surf, self)
 
