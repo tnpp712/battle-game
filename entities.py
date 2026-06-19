@@ -155,6 +155,7 @@ class Mech:
         self.energy = self.max_energy
         self.energy_regen = d.get("energy_regen", 12)
         self.ability_timers = [0.0 for _ in self.abilities]   # 每个技能独立冷却
+        self.cd_mult = 1.0          # 技能冷却乘子（Roguelite 升级降低）
 
         self.pos = Vector2(pos)
         self.heading = Vector2(1, 0)
@@ -347,7 +348,7 @@ class Mech:
             return False
         fx(self, game, spec, target)
         self.energy -= spec["cost"]
-        self.ability_timers[slot] = spec["cd"]
+        self.ability_timers[slot] = spec["cd"] * self.cd_mult
         return True
 
 

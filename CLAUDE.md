@@ -32,6 +32,7 @@ pygame.init(); screen=pygame.display.set_mode((C.SCREEN_W,C.SCREEN_H))
 fonts, wfonts = load_fonts(); g=Game(fonts, wfonts); g._start_game(); g.start_wave()
 for _ in range(60*60*3):
     g.update(1/60); g.draw(screen)
+    if g.state=="UPGRADE": g._choose_upgrade(0)   # 清波后三选一
     if g.state=="BUILD": g.start_wave()
     if g.state in ("WON","LOST"): break
 print("OK", g.state); pygame.quit()
@@ -86,7 +87,9 @@ PY
 
 ### 状态机
 
-`Game.state` 取值 `MENU / BUILD / WAVE / WON / LOST`，是理解全局行为的关键：
+`Game.state` 取值 `MENU / BUILD / WAVE / UPGRADE / WON / LOST`，是理解全局行为的关键：
+
+- **UPGRADE**：每清一波后（`_wave_cleared` 非通关分支）进入的**三选一 Roguelite 升级**。`upgrade_choices` 随机取 `config.UPGRADES` 三项，点击卡片或按 1/2/3（`_choose_upgrade`→`_apply_upgrade`）把强化施加到当前机兵/经济/终端（按 `effect` 分派，直接改实例字段如 `m.damage`/`m.cd_mult`/`self.reward_mult`/`terminal.max_hp`，持续整局），然后转 BUILD。`update` 在 UPGRADE 直接返回；`draw` 走 `_draw_upgrade` 覆盖层。**无窗口测试遇 UPGRADE 必须 `_choose_upgrade(0)` 才能继续推进**。
 
 - **MENU**：开局菜单（`reset()` 进入此态）。选难度（`config.DIFFICULTIES`，1/2/3）、无尽开关（E）、**点击卡片增减出战阵容**（`menu_cards`/`_toggle_squad`，仅已解锁、≤`SQUAD_MAX`），按 N/空格/回车 `_start_game()`（按最终阵容 `_spawn_squad`）→ BUILD 并预排第一波。**解锁/战绩持久化**见 [save.py](save.py)（路径可用环境变量 `BATTLE_GAME_SAVE` 覆盖，测试必须设它以免污染用户目录）：`Game.unlocked`/`Game.save` 整生命周期保留；WON/LOST 时 `_record_result` 更新最佳波/通关数/最高分、按 `config.UNLOCK_RULES` 解锁兵种并落盘（`_ended` 保证只记一次）。`update`/`_on_mouse_down` 在 MENU 直接返回；`draw` 走 `_draw_menu` 覆盖层、跳过 HUD。**注意：直接 `start_wave()` 在 MENU 不生效，无窗口测试需先 `_start_game()`**。难度乘子在 `_scale_enemy`（出怪时）与 `_prepare_wave`（数量）施加；无尽模式 `wave_index >= len(WAVES)` 后由 `_endless_wave`/`_wave_interval` 程序化续波、`_wave_cleared` 不判 WON、`score` 计分。
 - **BUILD**：机兵可被路径指令移动（用于布防前调位），但无敌人、无战斗。按 `N`（`start_wave`）进入 WAVE。

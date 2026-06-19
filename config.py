@@ -177,6 +177,18 @@ WAVES = [
 
 START_RESOURCES = 120
 
+# ---------- 局内 Roguelite 升级（每清一波三选一，按 effect 分派）----------
+UPGRADES = [
+    dict(id="dmg",     name="强化武器", desc="全体机兵伤害 +20%",         effect="mech_dmg",    value=0.20),
+    dict(id="hp",      name="强化装甲", desc="全体机兵血量上限 +25% 并修复", effect="mech_hp",     value=0.25),
+    dict(id="energy",  name="能量核心", desc="全体机兵能量回复 +5/秒",     effect="mech_energy", value=5),
+    dict(id="speed",   name="推进升级", desc="全体机兵移动速度 +15%",      effect="mech_speed",  value=0.15),
+    dict(id="cd",      name="战术冷却", desc="全体机兵技能冷却 -15%",      effect="mech_cd",     value=0.15),
+    dict(id="atkspd",  name="超频枪管", desc="全体机兵攻速 +18%",          effect="mech_atkspd", value=0.18),
+    dict(id="reward",  name="资源采集", desc="资源获取 +25%",             effect="reward",      value=0.25),
+    dict(id="term",    name="终端强化", desc="终端血量上限 +400 并修复",   effect="term_hp",     value=400),
+]
+
 # ---------- 难度 ----------
 # hp/speed/count/reward 为对敌人对应数值的乘子
 DIFFICULTIES = {

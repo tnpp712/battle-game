@@ -68,6 +68,8 @@ class Game:
         self.score = 0
         self.kills = 0
         self._ended = False         # 战绩是否已结算（WON/LOST 仅记一次）
+        self.reward_mult = 1.0      # 资源获取乘子（Roguelite 升级提升）
+        self.upgrade_choices = []   # 当前三选一升级
 
         self.state = "MENU"         # MENU / BUILD / WAVE / WON / LOST
         self.paused = False
@@ -239,6 +241,7 @@ class Game:
             reward = C.WAVES[self.wave_index]["reward"]
         else:
             reward = 150 + 30 * self._endless_level()    # 无尽波奖励
+        reward = int(reward * self.reward_mult)
         self.resources += reward
         self.score += reward
         self._flash(f"第 {self.wave_index + 1} 波清除！获得资源 {reward}")
@@ -249,7 +252,9 @@ class Game:
             self._record_result()      # 立即结算落盘，避免重开/退出丢失
             audio.play("win")
         else:
-            self.state = "BUILD"
+            # 进入三选一升级（Roguelite），选完再进 BUILD
+            self.state = "UPGRADE"
+            self.upgrade_choices = random.sample(C.UPGRADES, min(3, len(C.UPGRADES)))
             audio.play("build")
         # 复活阵亡机兵（保留游戏推进感），回满血
         for m in self.mechs:
@@ -340,6 +345,45 @@ class Game:
         else:
             self._flash(f"出战上限 {C.SQUAD_MAX}")
 
+    def _apply_upgrade(self, spec):
+        """施加局内升级到当前机兵/经济/终端（持续整局）。"""
+        eff, v = spec["effect"], spec["value"]
+        ms = self.mechs
+        if eff == "mech_dmg":
+            for m in ms:
+                m.damage *= (1 + v)
+        elif eff == "mech_hp":
+            for m in ms:
+                m.max_hp *= (1 + v)
+                m.hp = m.max_hp
+        elif eff == "mech_energy":
+            for m in ms:
+                m.energy_regen += v
+        elif eff == "mech_speed":
+            for m in ms:
+                m.speed *= (1 + v)
+        elif eff == "mech_cd":
+            for m in ms:
+                m.cd_mult *= (1 - v)
+        elif eff == "mech_atkspd":
+            for m in ms:
+                m.attack_cd /= (1 + v)
+        elif eff == "reward":
+            self.reward_mult += v
+        elif eff == "term_hp":
+            self.terminal.max_hp += v
+            self.terminal.hp += v
+
+    def _choose_upgrade(self, idx):
+        if self.state != "UPGRADE" or not (0 <= idx < len(self.upgrade_choices)):
+            return
+        spec = self.upgrade_choices[idx]
+        self._apply_upgrade(spec)
+        self.upgrade_choices = []
+        self.state = "BUILD"
+        audio.play("cast")
+        self._flash(f"已强化：{spec['name']}")
+
     def _record_result(self):
         """WON/LOST 结算：更新最佳战绩、检查解锁、持久化（仅一次）。"""
         if self._ended:
@@ -373,6 +417,10 @@ class Game:
                 self.endless = not self.endless
             elif key in (pygame.K_n, pygame.K_RETURN, pygame.K_SPACE):
                 self._start_game()
+            return
+        if self.state == "UPGRADE":
+            if key in (pygame.K_1, pygame.K_2, pygame.K_3):
+                self._choose_upgrade(key - pygame.K_1)
             return
         if self.state in ("WON", "LOST"):
             return
@@ -527,6 +575,13 @@ class Game:
                 for mtype, rect in self.menu_cards.items():
                     if rect.collidepoint(ev.pos):
                         self._toggle_squad(mtype)
+                        return
+            return
+        if self.state == "UPGRADE":
+            if ev.button == 1:
+                for i, rect in enumerate(self._upgrade_rects()):
+                    if rect.collidepoint(ev.pos):
+                        self._choose_upgrade(i)
                         return
             return
         # HUD 区域点击
@@ -783,7 +838,7 @@ class Game:
 
         if self.state in ("WON", "LOST"):
             self._record_result()    # 兜底（已记则 no-op）
-        if self.state in ("MENU", "WON", "LOST"):
+        if self.state in ("MENU", "UPGRADE", "WON", "LOST"):
             return
 
         # 命中顿帧：短暂冻结战斗与移动，但特效继续播
@@ -892,8 +947,9 @@ class Game:
             if e.alive:
                 survivors.append(e)
             else:
-                self.resources += e.reward
-                self.score += e.reward
+                r = int(e.reward * self.reward_mult)
+                self.resources += r
+                self.score += r
                 self.kills += 1
                 self.particles.explosion(e.pos, e.color, n=34 if e.boss else 20)
                 audio.play("explosion", vol=0.7, throttle=0.05)
@@ -1005,6 +1061,10 @@ class Game:
         if self.state == "MENU":
             self._draw_menu(surf)
             return
+        # 三选一升级覆盖层
+        if self.state == "UPGRADE":
+            self._draw_upgrade(surf)
+            return
         # 出怪方向预警（建造期）
         if self.state == "BUILD":
             self._draw_threat_edges(surf)
@@ -1076,6 +1136,55 @@ class Game:
         text(f"历史最佳：{bw} 波 · 通关 {self.save.get('wins', 0)} 次 ·"
              f" 最高分 {self.save.get('best_score', 0)}    （游戏中 R 重开回菜单）",
              528, self.fonts["small"], C.C_TEXT_DIM)
+
+    def _upgrade_rects(self):
+        n = len(self.upgrade_choices)
+        if n == 0:
+            return []
+        cw, ch, gap = 290, 210, 28
+        total = n * cw + (n - 1) * gap
+        x0 = C.SCREEN_W // 2 - total // 2
+        y = (C.SCREEN_H - C.HUD_H) // 2 - ch // 2
+        return [pygame.Rect(x0 + i * (cw + gap), y, cw, ch) for i in range(n)]
+
+    def _draw_upgrade(self, surf):
+        ov = pygame.Surface((C.SCREEN_W, C.SCREEN_H), pygame.SRCALPHA)
+        ov.fill((6, 9, 16, 215))
+        surf.blit(ov, (0, 0))
+        cx = C.SCREEN_W // 2
+        title = self.fonts["mid"].render(f"第 {self.wave_index} 波清除 — 选择一项强化", True, C.C_TEXT_WARN)
+        surf.blit(title, title.get_rect(center=(cx, 150)))
+        sub = self.fonts["small"].render("点击卡片，或按 1 / 2 / 3", True, C.C_TEXT_DIM)
+        surf.blit(sub, sub.get_rect(center=(cx, 188)))
+        mouse = pygame.mouse.get_pos()
+        for i, (spec, rect) in enumerate(zip(self.upgrade_choices, self._upgrade_rects())):
+            hover = rect.collidepoint(mouse)
+            fill = (34, 46, 64) if hover else (24, 30, 44)
+            border = C.C_SELECT if hover else (70, 130, 180)
+            pygame.draw.rect(surf, fill, rect, border_radius=12)
+            pygame.draw.rect(surf, border, rect, 3, border_radius=12)
+            kb = self.fonts["big"].render(str(i + 1), True, (60, 90, 130))
+            surf.blit(kb, kb.get_rect(center=(rect.centerx, rect.top + 46)))
+            nm = self.fonts["mid"].render(spec["name"], True, C.C_TERMINAL_HI)
+            surf.blit(nm, nm.get_rect(center=(rect.centerx, rect.top + 108)))
+            # 描述（按宽度简单折行）
+            self._blit_wrapped(surf, spec["desc"], self.fonts["small"], C.C_TEXT,
+                               rect.left + 18, rect.top + 142, rect.width - 36)
+
+    def _blit_wrapped(self, surf, text, font, color, x, y, maxw):
+        line = ""
+        yy = y
+        for ch in text:
+            if font.size(line + ch)[0] > maxw and line:
+                img = font.render(line, True, color)
+                surf.blit(img, img.get_rect(midtop=(x + maxw // 2, yy)))
+                yy += font.get_height() + 2
+                line = ch
+            else:
+                line += ch
+        if line:
+            img = font.render(line, True, color)
+            surf.blit(img, img.get_rect(midtop=(x + maxw // 2, yy)))
 
     def _draw_threat_edges(self, surf):
         """建造期在战场边缘按 threat_dirs 画脉冲红色箭头，预警出怪方向。"""
