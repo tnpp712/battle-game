@@ -614,6 +614,14 @@ class Enemy:
         self.flying = d["flying"]
         self.reward = d["reward"]
         self.bomber = d.get("bomber", False)
+        # 多样化行为
+        self.attack_range = d.get("attack_range", 0)   # >0 为远程攻击距离
+        self.shield = d.get("shield", 0)               # 自带护盾（先于血量吸收）
+        self.shield_aura = d.get("shield_aura")        # (护盾量, 半径) 给周围敌人加盾
+        self.heal_aura = d.get("heal_aura")            # (每跳治疗, 半径)
+        self.split = d.get("split")                    # (子类型, 数量) 死亡分裂
+        self.boss = d.get("boss", False)
+        self.aura_timer = 0.0
         self.pos = Vector2(pos)
         self.heading = Vector2(0, 1)
         self.timer = 0.0
@@ -628,9 +636,35 @@ class Enemy:
         return self.hp > 0
 
     def take_damage(self, dmg):
+        self.hit_flash = 0.12
+        if self.shield > 0:                 # 护盾优先吸收
+            absorbed = min(self.shield, dmg)
+            self.shield -= absorbed
+            dmg -= absorbed
+        if dmg <= 0:
+            return
         self.hp = max(0, self.hp - dmg)
         self._dmg_taken += dmg
-        self.hit_flash = 0.12
+
+    def _do_auras(self, dt, game):
+        """治疗 / 护盾光环：周期性增益周围敌人。"""
+        if not (self.heal_aura or self.shield_aura):
+            return
+        self.aura_timer -= dt
+        if self.aura_timer > 0:
+            return
+        self.aura_timer = 0.6
+        if self.heal_aura:
+            amt, rng = self.heal_aura
+            for e in game.enemies:
+                if e is not self and 0 < e.hp < e.max_hp and self.pos.distance_to(e.pos) <= rng:
+                    e.hp = min(e.max_hp, e.hp + amt)
+                    game.beams.append(Beam(self.pos, e.pos, C.C_BEAM_HEAL, ttl=0.2, width=2))
+        if self.shield_aura:
+            amt, rng = self.shield_aura
+            for e in game.enemies:
+                if e is not self and e.shield < amt and self.pos.distance_to(e.pos) <= rng:
+                    e.shield = amt
 
     def apply_slow(self, factor, dur):
         self.slow_factor = min(self.slow_factor, factor)
@@ -651,13 +685,14 @@ class Enemy:
             self.slow_timer -= dt
             if self.slow_timer <= 0:
                 self.slow_factor = 1.0
+        self._do_auras(dt, game)
         terminal = game.terminal
         to_term = terminal.pos - self.pos
         dist_term = to_term.length()
-        atk_range = self.radius + 12
+        atk_range = self.attack_range if self.attack_range else (self.radius + 12)
 
-        # 抵达终端
-        if dist_term <= terminal.radius + self.radius + 4:
+        # 抵达（远程兵从射程外即可攻击终端）
+        if dist_term <= terminal.radius + atk_range:
             if self.bomber:
                 terminal.take_damage(self.damage * 4)
                 game.beams.append(Beam(self.pos, terminal.pos, C.C_BEAM_ENEMY, ttl=0.25, width=4))

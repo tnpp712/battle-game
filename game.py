@@ -760,16 +760,28 @@ class Game:
 
         # 清理死亡 & 结算奖励
         survivors = []
+        spawned = []
         for e in self.enemies:
             if e.alive:
                 survivors.append(e)
             else:
                 self.resources += e.reward
-                self.particles.explosion(e.pos, e.color, n=20)
+                self.particles.explosion(e.pos, e.color, n=34 if e.boss else 20)
                 audio.play("explosion", vol=0.7, throttle=0.05)
                 # 大型单位死亡给点震屏
-                if e.radius >= 18 or e.bomber:
+                if e.boss:
+                    self.add_shake(15)
+                elif e.radius >= 18 or e.bomber:
                     self.add_shake(6)
+                # 分裂体：死亡迸出子代
+                if e.split:
+                    ctype, cnt = e.split
+                    for _ in range(cnt):
+                        off = Vector2(random.uniform(-1, 1), random.uniform(-1, 1))
+                        if off.length_squared() < 0.01:
+                            off = Vector2(1, 0)
+                        spawned.append(Enemy(ctype, e.pos + off.normalize() * (e.radius + 6)))
+        survivors.extend(spawned)
         self.enemies = survivors
         before = len(self.walls)
         for w in self.walls:

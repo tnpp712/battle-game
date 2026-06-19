@@ -422,6 +422,10 @@ def draw_enemy(surf, e, t, s=1):
             render.aacircle(surf, (210, 240, 255), p, max(1, int(R * 0.12)))
     elif e.slow_factor < 0.999:
         render.aaring(surf, (110, 175, 235), (cx, cy), int(R * 1.22), max(1, int(s)))
+    # 敌人护盾（青蓝能量环）
+    if getattr(e, "shield", 0) > 0:
+        pulse = 0.5 + 0.5 * math.sin(t * 5)
+        render.aaring(surf, (130, 205, 255), (cx, cy), int(R * (1.3 + 0.06 * pulse)), max(1, int(2 * s)))
     _hp(surf, cx - R, cy - R - 8 * s, R * 2, e.hp / e.max_hp, s)
 
 
@@ -534,9 +538,106 @@ def _draw_bomber(surf, e, t, s):
     render.aacircle(surf, (255, 255, 240), (cx, cy), max(1, int(r * 0.14)))
 
 
+def _draw_splitter(surf, e, t, s):
+    """分裂体：主核 + 三个待裂出的子瓣（脉动）。"""
+    cx, cy, R = e.pos.x * s, e.pos.y * s, e.radius * s
+    base = _flash(e.color, e.hit_flash)
+    pulse = 0.5 + 0.5 * math.sin(t * 6)
+    render.glow(surf, (cx, cy), R * 2.2, shade(e.color, 0.5))
+    for i in range(3):
+        bp = _poly(cx, cy, [(0.55 + 0.12 * pulse, 0)], i * 120 + t * 40, R)[0]
+        render.aacircle(surf, shade(base, 0.7), bp, int(R * 0.42))
+    render.aacircle(surf, base, (cx, cy), int(R * 0.85))
+    render.aacircle(surf, lighten(base, 0.3), (cx, cy), int(R * 0.5))
+    render.aacircle(surf, (255, 230, 255), (cx, cy), max(2, int(R * 0.2)))
+
+
+def _draw_shielder(surf, e, t, s):
+    """护盾兵：厚甲圆体 + 六边能量罩。"""
+    cx, cy = e.pos.x * s, e.pos.y * s
+    deg = _deg(e.heading)
+    R = e.radius * s
+    base = _flash(e.color, e.hit_flash)
+    render.glow(surf, (cx, cy), R * 2.1, shade(e.color, 0.45))
+    render.aacircle(surf, shade(base, 0.5), (cx, cy), int(R))
+    render.aacircle(surf, base, (cx, cy), int(R * 0.78))
+    render.aacircle(surf, lighten(base, 0.3), _poly(cx, cy, [(-0.2, -0.2)], deg, R)[0], int(R * 0.36))
+    # 旋转六边护罩
+    sh = [(math.cos(a), math.sin(a)) for a in [i * math.pi / 3 + t * 0.6 for i in range(6)]]
+    pygame.draw.aalines(surf, (160, 210, 255), True, _poly(cx, cy, sh, 0, R * 1.12))
+
+
+def _draw_healer(surf, e, t, s):
+    """治疗兵：绿核 + 脉动医疗十字。"""
+    cx, cy, R = e.pos.x * s, e.pos.y * s, e.radius * s
+    base = _flash(e.color, e.hit_flash)
+    pulse = 0.5 + 0.5 * math.sin(t * 4)
+    render.glow(surf, (cx, cy), R * (2.0 + 0.5 * pulse), shade(e.color, 0.5))
+    render.aacircle(surf, shade(base, 0.6), (cx, cy), int(R))
+    render.aacircle(surf, base, (cx, cy), int(R * 0.8))
+    render.aaring(surf, lighten(base, 0.4), (cx, cy), int(R * (1.15 + 0.1 * pulse)), max(1, int(s)))
+    cw = max(2, int(R * 0.5))
+    th = max(2, int(R * 0.22))
+    pygame.draw.rect(surf, (235, 255, 240), (cx - cw, cy - th, cw * 2, th * 2))
+    pygame.draw.rect(surf, (235, 255, 240), (cx - th, cy - cw, th * 2, cw * 2))
+
+
+def _draw_ranged(surf, e, t, s):
+    """远程兵：流线体 + 前向炮管 + 单眼。"""
+    cx, cy = e.pos.x * s, e.pos.y * s
+    deg = _deg(e.heading)
+    R = e.radius * s
+    base = _flash(e.color, e.hit_flash)
+    render.glow(surf, (cx, cy), R * 2.0, shade(e.color, 0.45))
+    # 炮管
+    render.aapolygon(surf, shade(base, 0.5),
+                     _poly(cx, cy, [(0.2, -0.22), (1.6, -0.15), (1.6, 0.15), (0.2, 0.22)], deg, R))
+    body = _poly(cx, cy, [(0.9, 0), (0.1, 0.85), (-0.9, 0.5), (-0.9, -0.5), (0.1, -0.85)], deg, R)
+    render.aapolygon(surf, base, body)
+    pygame.draw.aalines(surf, lighten(base, 0.4), True, body)
+    eye = _poly(cx, cy, [(0.2, 0)], deg, R)[0]
+    render.glow(surf, eye, R * 0.5, (255, 220, 140))
+    render.aacircle(surf, (255, 240, 190), eye, max(2, int(R * 0.22)))
+
+
+def _draw_boss(surf, e, t, s):
+    """首领：大型多环装甲核心 + 旋转尖刺 + 双目。"""
+    cx, cy = e.pos.x * s, e.pos.y * s
+    deg = _deg(e.heading)
+    R = e.radius * s
+    base = _flash(e.color, e.hit_flash)
+    pulse = 0.5 + 0.5 * math.sin(t * 3)
+    render.glow(surf, (cx, cy), R * 2.6, shade(e.color, 0.5))
+    # 旋转外尖刺
+    for i in range(10):
+        a = _poly(cx, cy, [(1.05, 0)], i * 36 + t * 20, R)[0]
+        b = _poly(cx, cy, [(1.4, 0)], i * 36 + t * 20, R)[0]
+        _line(surf, a, b, shade(base, 0.6), 3 * s)
+    # 装甲盘
+    render.aacircle(surf, shade(base, 0.45), (cx, cy), int(R))
+    render.aaring(surf, lighten(base, 0.3), (cx, cy), int(R), max(1, int(2 * s)))
+    render.aacircle(surf, base, (cx, cy), int(R * 0.74))
+    # 分面装甲线
+    for i in range(6):
+        p = _poly(cx, cy, [(0.2, 0), (0.74, 0)], i * 60 - t * 10, R)
+        _line(surf, p[0], p[1], shade(base, 0.55), 1.6 * s)
+    # 核心 + 双目
+    render.glow(surf, (cx, cy), R * 1.3, (255, 120, 150))
+    render.aacircle(surf, (255, 160, 180), (cx, cy), int(R * (0.34 + 0.05 * pulse)))
+    for sy in (-0.32, 0.32):
+        ey = _poly(cx, cy, [(0.5, sy)], deg, R)[0]
+        render.glow(surf, ey, R * 0.35, (255, 90, 110))
+        render.aacircle(surf, (255, 220, 230), ey, max(2, int(R * 0.1)))
+
+
 _ENEMY_DRAW = {
     "蛛型": _draw_spider,
     "重甲": _draw_armored,
     "飞蝗": _draw_flyer,
     "爆冲": _draw_bomber,
+    "分裂体": _draw_splitter,
+    "护盾兵": _draw_shielder,
+    "治疗兵": _draw_healer,
+    "远程兵": _draw_ranged,
+    "首领": _draw_boss,
 }

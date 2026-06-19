@@ -123,11 +123,19 @@ GLOBAL_SKILLS = {
 }
 
 # ---------- 敌人类型 ----------
+# 行为标志（Enemy 读取）：bomber 自爆；flying 无视障碍直冲；attack_range 远程攻击距离；
+# shield 自带护盾；shield_aura=(护盾量,半径) 给周围敌人加盾；heal_aura=(每跳治疗,半径)；
+# split=(子类型,数量) 死亡分裂；boss 首领（造型/震屏）。
 ENEMY_TYPES = {
     "蛛型": dict(color=(180, 90, 110),  radius=12, hp=70,  speed=70,  damage=9,  attack_cd=0.8, flying=False, reward=8),
     "重甲": dict(color=(120, 100, 90),  radius=20, hp=320, speed=42,  damage=22, attack_cd=1.2, flying=False, reward=20),
     "飞蝗": dict(color=(200, 160, 90),  radius=11, hp=55,  speed=95,  damage=7,  attack_cd=0.7, flying=True,  reward=12),
     "爆冲": dict(color=(255, 110, 70),  radius=14, hp=90,  speed=120, damage=60, attack_cd=0.1, flying=False, reward=15, bomber=True),
+    "分裂体": dict(color=(205, 120, 205), radius=16, hp=130, speed=58, damage=14, attack_cd=1.0, flying=False, reward=18, split=("蛛型", 3)),
+    "护盾兵": dict(color=(110, 160, 215), radius=18, hp=190, speed=44, damage=18, attack_cd=1.2, flying=False, reward=26, shield=120, shield_aura=(60, 130)),
+    "治疗兵": dict(color=(110, 210, 150), radius=14, hp=150, speed=56, damage=8,  attack_cd=1.0, flying=False, reward=24, heal_aura=(14, 135)),
+    "远程兵": dict(color=(230, 165, 90),  radius=13, hp=95,  speed=58, damage=16, attack_cd=1.4, flying=False, reward=20, attack_range=175),
+    "首领": dict(color=(225, 80, 120),    radius=34, hp=3000, speed=32, damage=46, attack_cd=1.0, flying=False, reward=240, attack_range=160, boss=True),
 }
 
 # ---------- 建造物 / 基地升级 ----------
@@ -149,12 +157,13 @@ TERMINAL_RADIUS = 40
 # ---------- 波次 ----------
 # 每波: enemies = [(类型, 数量), ...], interval = 出怪间隔(秒), reward = 通关奖励
 WAVES = [
-    dict(enemies=[("蛛型", 8)],                          interval=1.1, reward=80),
-    dict(enemies=[("蛛型", 10), ("飞蝗", 4)],            interval=0.95, reward=110),
-    dict(enemies=[("蛛型", 10), ("重甲", 2), ("飞蝗", 6)], interval=0.9, reward=140),
-    dict(enemies=[("飞蝗", 12), ("爆冲", 3)],            interval=0.8, reward=160),
-    dict(enemies=[("重甲", 5), ("蛛型", 14), ("爆冲", 4)], interval=0.7, reward=200),
-    dict(enemies=[("重甲", 8), ("飞蝗", 14), ("爆冲", 6), ("蛛型", 18)], interval=0.6, reward=300),
+    dict(enemies=[("蛛型", 8)],                                      interval=1.1, reward=80),
+    dict(enemies=[("蛛型", 10), ("飞蝗", 4)],                        interval=0.95, reward=110),
+    dict(enemies=[("蛛型", 8), ("重甲", 2), ("远程兵", 4)],          interval=0.9, reward=140),
+    dict(enemies=[("飞蝗", 10), ("爆冲", 3), ("治疗兵", 2)],         interval=0.85, reward=170),
+    dict(enemies=[("重甲", 4), ("分裂体", 4), ("护盾兵", 2), ("远程兵", 4)], interval=0.75, reward=210),
+    dict(enemies=[("重甲", 6), ("飞蝗", 12), ("爆冲", 5), ("治疗兵", 3), ("护盾兵", 2)], interval=0.65, reward=270),
+    dict(enemies=[("首领", 1), ("护盾兵", 3), ("分裂体", 4), ("远程兵", 6)], interval=0.7, reward=420),  # Boss 波
 ]
 
 START_RESOURCES = 120
