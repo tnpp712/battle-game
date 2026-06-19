@@ -41,7 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - name: Build .app
-        run: pyinstaller --noconfirm --clean --windowed --name BattleGame main.py
+        run: pyinstaller --noconfirm --clean --windowed --icon assets/icon.icns --name BattleGame main.py
       - name: Package .app
         run: ditto -c -k --keepParent "dist/BattleGame.app" "BattleGame-macOS.zip"
       - name: Upload to release
@@ -63,7 +63,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - name: Build .exe
-        run: pyinstaller --noconfirm --clean --windowed --onefile --name BattleGame main.py
+        run: pyinstaller --noconfirm --clean --windowed --onefile --icon assets/icon.ico --name BattleGame main.py
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:

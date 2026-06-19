@@ -17,7 +17,7 @@ pip install -r requirements.txt      # 安装依赖（仅 pygame）
 pkill -f "main.py"; python3 main.py  # 启动游戏窗口（先关旧实例）
 ```
 
-无 lint 配置、无测试框架（冒烟见下）。**发布**：push `v*` tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub Actions 用 PyInstaller 自动构建 macOS `.app` + Windows `.exe` 并发布到 Release（双击即玩，未签名）。本地验证打包：`pyinstaller --windowed --name BattleGame main.py`（产物在 `dist/`）。改字体加载逻辑时注意 `main.py:CJK_FONT_CANDIDATES` 已含 macOS/Windows/Linux 多平台路径，别只测 macOS。
+无 lint 配置、无测试框架（冒烟见下）。**发布**：push `v*` tag 触发 [.github/workflows/release.yml](.github/workflows/release.yml)，由 GitHub Actions 用 PyInstaller 自动构建 macOS `.app` + Windows `.exe` 并发布到 Release（双击即玩，未签名）。本地验证打包：`pyinstaller --windowed --icon assets/icon.icns --name BattleGame main.py`（产物在 `dist/`）。**应用图标**：`assets/icon.{icns,ico}` 由 `python3 tools/make_icon.py`（复用游戏霓虹渲染画终端核心+防卫环+机兵）生成主图、再 `bash tools/build_icons.sh` 转格式；改图标重跑这两步即可。改字体加载逻辑时注意 `main.py:CJK_FONT_CANDIDATES` 已含 macOS/Windows/Linux 多平台路径，别只测 macOS。
 
 **重要：每次启动游戏窗口测试前，必须先关闭之前打开的实例**，否则 Dock 里会堆积多个窗口。统一用 `pkill -f "main.py"` 关掉所有旧实例后再启动；用 `pgrep -fl "python3 main.py"` 确认是否还有残留。
 
