@@ -3,6 +3,8 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > 沟通约定：本仓库的所有思考过程、回复与文档一律使用**中文**。
+>
+> 提交约定：**git 提交信息中不得出现任何 AI 署名**——不要添加 `Co-Authored-By: Claude ...`、`Generated with Claude` 等字样。提交信息只写实际改动内容。
 
 ## 项目概述
 
